@@ -33,6 +33,7 @@ type ReadReq struct {
 	PID                vm.PID
 	CanWaitForCoalesce bool
 	Info               interface{}
+	FromPrefetcher     bool
 }
 
 // Meta returns the message meta.
@@ -132,6 +133,7 @@ func (b ReadReqBuilder) Build() *ReadReq {
 	r.Info = b.info
 	r.AccessByteSize = b.byteSize
 	r.CanWaitForCoalesce = b.canWaitForCoalesce
+	r.FromPrefetcher = b.fromPrefetcher
 	return r
 }
 
