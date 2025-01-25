@@ -23,6 +23,7 @@ type Builder struct {
 	bankLatency           int
 	numReqPerCycle        int
 	maxNumConcurrentTrans int
+	usePrefetcher         bool
 	lowModuleFinder       mem.LowModuleFinder
 	visTracer             tracing.Tracer
 }
@@ -128,6 +129,12 @@ func (b *Builder) WithLowModuleFinder(
 	return b
 }
 
+// Use prefetcher
+func (b *Builder) WithPrefetcher() *Builder {
+	b.usePrefetcher = true
+	return b
+}
+
 // Build returns a new cache unit
 func (b *Builder) Build(name string) *Cache {
 	b.assertAllRequiredInformationIsAvailable()
@@ -135,6 +142,7 @@ func (b *Builder) Build(name string) *Cache {
 	c := &Cache{
 		log2BlockSize:  b.log2BlockSize,
 		numReqPerCycle: b.numReqPerCycle,
+		usePrefetcher:  b.usePrefetcher,
 	}
 	c.TickingComponent = sim.NewTickingComponent(
 		name, b.engine, b.freq, c)

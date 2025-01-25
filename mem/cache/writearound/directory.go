@@ -299,6 +299,58 @@ func (d *directory) fetchFromBottom(
 	victim.IsLocked = true
 	d.cache.directory.Visit(victim)
 
+	if d.cache.usePrefetcher && !d.cache.mshr.IsFull() {
+		nextCacheLineID := cacheLineID + blockSize
+		nextLowModule := d.cache.lowModuleFinder.Find(nextCacheLineID)
+
+		if d.cache.mshr.Query(pid, nextCacheLineID) != nil {
+			return true
+		}
+
+		nextVictim := d.cache.directory.FindVictim(nextCacheLineID)
+
+		if nextVictim.IsLocked || nextVictim.ReadCount > 0 {
+			return true
+		}
+
+		prefetchToBottom := mem.ReadReqBuilder{}.
+			WithSendTime(now).
+			WithSrc(d.cache.bottomPort).
+			WithDst(nextLowModule).
+			WithAddress(nextCacheLineID).
+			WithPID(pid).
+			WithByteSize(blockSize).
+			WithPrefetcher().
+			Build()
+
+		err := d.cache.bottomPort.Send(prefetchToBottom)
+		if err != nil {
+			return true //Even if the prefetch fails, the read will still be processed
+		}
+
+		nextMshrEntry := d.cache.mshr.Add(pid, nextCacheLineID)
+
+		prefetchTrans := &transaction{
+			id:             sim.GetIDGenerator().Generate(),
+			read:           prefetchToBottom,
+			readToBottom:   prefetchToBottom,
+			block:          nextVictim,
+			fromPrefetcher: true,
+		}
+
+		nextMshrEntry.Requests = append(nextMshrEntry.Requests, prefetchTrans)
+		nextMshrEntry.ReadReq = prefetchToBottom
+		nextMshrEntry.Block = nextVictim
+
+		nextVictim.Tag = nextCacheLineID
+		nextVictim.PID = pid
+		nextVictim.IsValid = true
+		nextVictim.IsLocked = true
+		d.cache.directory.Visit(nextVictim)
+
+		d.cache.postCoalesceTransactions = append(d.cache.postCoalesceTransactions, prefetchTrans)
+	}
+
 	return true
 }
 

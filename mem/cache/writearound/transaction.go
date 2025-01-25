@@ -33,6 +33,8 @@ type transaction struct {
 
 	fetchAndWrite bool
 	done          bool
+
+	fromPrefetcher bool
 }
 
 func (t *transaction) Address() uint64 {

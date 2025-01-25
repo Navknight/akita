@@ -156,6 +156,10 @@ func (s *bankStage) finalizeWriteFetchedTrans(
 
 	s.postPipelineBuf.Pop()
 
+	if trans.fromPrefetcher {
+		trans.done = true
+	}
+
 	return true
 }
 

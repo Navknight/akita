@@ -62,7 +62,13 @@ type ReadReqBuilder struct {
 	pid                vm.PID
 	address, byteSize  uint64
 	canWaitForCoalesce bool
+	fromPrefetcher     bool
 	info               interface{}
+}
+
+func (b ReadReqBuilder) WithPrefetcher() ReadReqBuilder {
+	b.fromPrefetcher = true
+	return b
 }
 
 // WithSendTime sets the send time of the request to build.
