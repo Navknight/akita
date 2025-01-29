@@ -144,6 +144,9 @@ func (b *Builder) Build(name string) *Cache {
 		numReqPerCycle: b.numReqPerCycle,
 		usePrefetcher:  b.usePrefetcher,
 	}
+	if b.usePrefetcher {
+		c.prefetcher = c.directoryStage.NewStridePrefetcher()
+	}
 	c.TickingComponent = sim.NewTickingComponent(
 		name, b.engine, b.freq, c)
 

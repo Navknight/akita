@@ -40,6 +40,7 @@ type Cache struct {
 	isPaused bool
 
 	usePrefetcher bool
+	prefetcher    *StridePrefetcher
 }
 
 // SetLowModuleFinder sets the finder that tells which remote port can serve
