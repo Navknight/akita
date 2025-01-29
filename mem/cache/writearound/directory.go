@@ -3,6 +3,7 @@ package writearound
 import (
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
+	"github.com/sarchlab/akita/v3/mem/vm"
 	"github.com/sarchlab/akita/v3/pipelining"
 	"github.com/sarchlab/akita/v3/sim"
 	"github.com/sarchlab/akita/v3/tracing"
@@ -68,7 +69,7 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 	pid := read.PID
 	blockSize := uint64(1 << d.cache.log2BlockSize)
 	cacheLineID := addr / blockSize * blockSize
-
+	d.cache.timeTaken[addr] = now
 	mshrEntry := d.cache.mshr.Query(pid, cacheLineID)
 	if mshrEntry != nil {
 		return d.processMSHRHit(now, trans, mshrEntry)
@@ -117,11 +118,15 @@ func (d *directory) processReadHit(
 	trans.block = block
 	trans.bankAction = bankActionReadHit
 	block.ReadCount++
+	block.WasRead = true
 	d.cache.directory.Visit(block)
 	bankBuf.Push(trans)
 
 	d.buf.Pop()
 	tracing.AddTaskStep(trans.id, d.cache, "read-hit")
+	if block.FromPrefetcher {
+		tracing.AddTaskStep(trans.id, d.cache, "prefetch-hit")
+	}
 
 	return true
 }
@@ -149,6 +154,9 @@ func (d *directory) processReadMiss(
 	}
 
 	d.buf.Pop()
+	if victim.FromPrefetcher && !victim.WasRead {
+		tracing.AddTaskStep(trans.id, d.cache, "prefetch-miss")
+	}
 	tracing.AddTaskStep(trans.id, d.cache, "read-miss")
 
 	return true
@@ -261,9 +269,9 @@ func (d *directory) processWriteHit(
 }
 
 type StridePrefetcher struct {
-	lastAddrs      map[uint64]uint64
-	strides        map[uint64]uint64
-	confidence     map[uint64]uint64
+	lastAddrs      map[vm.PID]uint64
+	strides        map[vm.PID]uint64
+	confidence     map[vm.PID]uint64
 	maxConfidence  int
 	prefetchDegree int
 	memoryLatency  int
@@ -275,16 +283,16 @@ func (d *directory) NewStridePrefetcher(latency ...int) *StridePrefetcher {
 		defaultLatency = latency[0]
 	}
 	return &StridePrefetcher{
-		lastAddrs:      make(map[uint64]uint64),
-		strides:        make(map[uint64]uint64),
-		confidence:     make(map[uint64]uint64),
+		lastAddrs:      make(map[vm.PID]uint64),
+		strides:        make(map[vm.PID]uint64),
+		confidence:     make(map[vm.PID]uint64),
 		maxConfidence:  2,
 		prefetchDegree: defaultLatency / 2,
 		memoryLatency:  defaultLatency,
 	}
 }
 
-func (sp *StridePrefetcher) UpdatePattern(pid uint64, addrs uint64) {
+func (sp *StridePrefetcher) UpdatePattern(pid vm.PID, addrs uint64) {
 	lastAddrs, exists := sp.lastAddrs[pid]
 	if exists {
 		currentStride := int64(addrs) - int64(lastAddrs)
@@ -302,15 +310,15 @@ func (sp *StridePrefetcher) UpdatePattern(pid uint64, addrs uint64) {
 	sp.lastAddrs[pid] = addrs
 }
 
-func (sp *StridePrefetcher) ShouldPrefetch(pid uint64) (bool, uint64) {
+func (sp *StridePrefetcher) ShouldPrefetch(pid vm.PID) (bool, uint64) {
 	confidence, exists := sp.confidence[pid]
 	if !exists || confidence < uint64(sp.maxConfidence) {
-		return false,0
+		return false, 0
 	}
 
 	stride, exists := sp.strides[pid]
 	if !exists {
-		return false,0
+		return false, 0
 	}
 
 	return true, stride
@@ -353,85 +361,88 @@ func (d *directory) fetchFromBottom(
 	victim.PID = pid
 	victim.IsValid = true
 	victim.IsLocked = true
+	victim.FromPrefetcher = false
+	victim.WasRead = false
 	d.cache.directory.Visit(victim)
 
 	if d.cache.usePrefetcher && !d.cache.mshr.IsFull() {
 		nextCacheLineID := cacheLineID + blockSize
-		nextLowModule := d.cache.lowModuleFinder.Find(nextCacheLineID)
-		//uncomment for next line prefetching
-		// d.issuePrefetch(now, pid, nextCacheLineID, nextLowModule)
+		// uncomment for next line prefetching
+		d.issuePrefetch(now, pid, nextCacheLineID, blockSize)
 
-		shouldPrefetch, stride := d.cache.prefetcher.ShouldPrefetch(pid)
-		if shouldPrefetch {
-			for i:= 0; i <= d.cache.prefetcher.prefetchDegree; i++ {
-				nextCacheLineID = cacheLineID + blockSize + uint64(i) * stride
-				nextLowModule = d.cache.lowModuleFinder.Find(nextCacheLineID)
-				d.issuePrefetch(now, pid, nextCacheLineID, nextLowModule)
+		// shouldPrefetch, stride := d.cache.prefetcher.ShouldPrefetch(pid)
+		// if shouldPrefetch {
+		// 	for i := 0; i <= d.cache.prefetcher.prefetchDegree; i++ {
+		// 		nextCacheLineID = cacheLineID + blockSize + uint64(i)*stride
+		// 		// nextLowModule = d.cache.lowModuleFinder.Find(nextCacheLineID)
+		// 		d.issuePrefetch(now, pid, nextCacheLineID, blockSize)
 
-				if d.cache.mshr.IsFull() {
-					break
-				}
-		}
+		// 		if d.cache.mshr.IsFull() {
+		// 			break
+		// 		}
+		// 	}
+		// }
 	}
 
 	return true
 }
 
 func (d *directory) issuePrefetch(
-    now sim.VTimeInSec,
-    pid uint64,
-    prefetchAddr uint64,
-    blockSize uint64,
+	now sim.VTimeInSec,
+	pid vm.PID,
+	prefetchAddr uint64,
+	blockSize uint64,
 ) {
-    // Skip if address already in MSHR
-    if d.cache.mshr.Query(pid, prefetchAddr) != nil {
-        return
-    }
+	// Skip if address already in MSHR
+	if d.cache.mshr.Query(pid, prefetchAddr) != nil {
+		return
+	}
 
-    nextVictim := d.cache.directory.FindVictim(prefetchAddr)
-    if nextVictim.IsLocked || nextVictim.ReadCount > 0 {
-        return
-    }
+	nextVictim := d.cache.directory.FindVictim(prefetchAddr)
+	if nextVictim.IsLocked || nextVictim.ReadCount > 0 {
+		return
+	}
 
-    nextLowModule := d.cache.lowModuleFinder.Find(prefetchAddr)
-    prefetchReq := mem.ReadReqBuilder{}.
-        WithSendTime(now).
-        WithSrc(d.cache.bottomPort).
-        WithDst(nextLowModule).
-        WithAddress(prefetchAddr).
-        WithPID(pid).
-        WithByteSize(blockSize).
-        WithPrefetcher().
-        Build()
+	nextLowModule := d.cache.lowModuleFinder.Find(prefetchAddr)
+	prefetchReq := mem.ReadReqBuilder{}.
+		WithSendTime(now).
+		WithSrc(d.cache.bottomPort).
+		WithDst(nextLowModule).
+		WithAddress(prefetchAddr).
+		WithPID(pid).
+		WithByteSize(blockSize).
+		WithPrefetcher().
+		Build()
+	if err := d.cache.bottomPort.Send(prefetchReq); err != nil {
+		return
+	}
 
-    if err := d.cache.bottomPort.Send(prefetchReq); err != nil {
-        return
-    }
+	// Set up MSHR entry for prefetch
+	mshrEntry := d.cache.mshr.Add(pid, prefetchAddr)
+	prefetchTrans := &transaction{
+		id:             sim.GetIDGenerator().Generate(),
+		read:           prefetchReq,
+		readToBottom:   prefetchReq,
+		block:          nextVictim,
+		fromPrefetcher: true,
+	}
 
-    // Set up MSHR entry for prefetch
-    mshrEntry := d.cache.mshr.Add(pid, prefetchAddr)
-    prefetchTrans := &transaction{
-        id:             sim.GetIDGenerator().Generate(),
-        read:           prefetchReq,
-        readToBottom:   prefetchReq,
-        block:          nextVictim,
-        fromPrefetcher: true,
-    }
+	mshrEntry.Requests = append(mshrEntry.Requests, prefetchTrans)
+	mshrEntry.ReadReq = prefetchReq
+	mshrEntry.Block = nextVictim
 
-    mshrEntry.Requests = append(mshrEntry.Requests, prefetchTrans)
-    mshrEntry.ReadReq = prefetchReq
-    mshrEntry.Block = nextVictim
+	nextVictim.Tag = prefetchAddr
+	nextVictim.PID = pid
+	nextVictim.IsValid = true
+	nextVictim.IsLocked = true
+	nextVictim.FromPrefetcher = true
+	nextVictim.WasRead = false
+	d.cache.directory.Visit(nextVictim)
 
-    nextVictim.Tag = prefetchAddr
-    nextVictim.PID = pid
-    nextVictim.IsValid = true
-    nextVictim.IsLocked = true
-    d.cache.directory.Visit(nextVictim)
-
-    d.cache.postCoalesceTransactions = append(
-        d.cache.postCoalesceTransactions,
-        prefetchTrans,
-    )
+	d.cache.postCoalesceTransactions = append(
+		d.cache.postCoalesceTransactions,
+		prefetchTrans,
+	)
 }
 
 func (d *directory) getBankBuf(block *cache.Block) sim.Buffer {

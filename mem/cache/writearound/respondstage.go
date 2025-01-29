@@ -36,7 +36,7 @@ func (s *respondStage) respondReadTrans(
 	if !trans.done {
 		return false
 	}
-
+	// fmt.Println((now - s.cache.timeTaken[trans.Address()]))
 	read := trans.read
 	dr := mem.DataReadyRspBuilder{}.
 		WithSendTime(now).

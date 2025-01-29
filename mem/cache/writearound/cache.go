@@ -41,6 +41,7 @@ type Cache struct {
 
 	usePrefetcher bool
 	prefetcher    *StridePrefetcher
+	timeTaken     map[uint64]sim.VTimeInSec
 }
 
 // SetLowModuleFinder sets the finder that tells which remote port can serve

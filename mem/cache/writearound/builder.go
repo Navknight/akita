@@ -145,8 +145,9 @@ func (b *Builder) Build(name string) *Cache {
 		usePrefetcher:  b.usePrefetcher,
 	}
 	if b.usePrefetcher {
-		c.prefetcher = c.directoryStage.NewStridePrefetcher()
+		c.prefetcher = c.directoryStage.NewStridePrefetcher(50)
 	}
+	c.timeTaken = make(map[uint64]sim.VTimeInSec)
 	c.TickingComponent = sim.NewTickingComponent(
 		name, b.engine, b.freq, c)
 

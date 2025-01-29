@@ -19,6 +19,7 @@ type Block struct {
 	DirtyMask    []bool
 
 	FromPrefetcher bool
+	WasRead        bool
 }
 
 // A Set is a list of blocks where a certain piece memory can be stored at
