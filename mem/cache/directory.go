@@ -20,6 +20,9 @@ type Block struct {
 
 	FromPrefetcher bool
 	WasRead        bool
+
+	NumReadAccesses  int
+	NumWriteAccesses int
 }
 
 // A Set is a list of blocks where a certain piece memory can be stored at

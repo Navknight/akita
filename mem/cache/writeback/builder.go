@@ -31,6 +31,10 @@ type Builder struct {
 
 	dirLatency  int
 	bankLatency int
+
+	enableBlockAccessTracing bool
+	blockAccessBinSize       int
+	blockAccessMaxAccesses   int
 }
 
 // MakeBuilder creates a new builder with default configurations.
@@ -52,6 +56,13 @@ func MakeBuilder() Builder {
 // WithEngine sets the engine to be used by the caches.
 func (b Builder) WithEngine(engine sim.Engine) Builder {
 	b.engine = engine
+	return b
+}
+
+func (b Builder) WithBlockAccessTracing(binSize, maxAccesses int) Builder {
+	b.enableBlockAccessTracing = true
+	b.blockAccessBinSize = binSize
+	b.blockAccessMaxAccesses = maxAccesses
 	return b
 }
 
@@ -176,7 +187,16 @@ func (b *Builder) configureCache(cacheModule *Cache) {
 
 	mshr := cache.NewMSHR(b.numMSHREntry)
 	storage := mem.NewStorage(b.byteSize)
-
+	if b.enableBlockAccessTracing {
+		tracer := NewBlockAccessTracer(b.blockAccessBinSize, b.blockAccessMaxAccesses)
+		if tracer == nil {
+			panic("tracer not created")
+		}
+		cacheModule.SetBlockAccessTracer(tracer)
+		if cacheModule.blockAccessTracer == nil {
+			panic("block access tracer not set")
+		}
+	}
 	cacheModule.log2BlockSize = b.log2BlockSize
 	cacheModule.numReqPerCycle = b.numReqPerCycle
 	cacheModule.directory = directory

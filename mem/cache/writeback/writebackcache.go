@@ -51,6 +51,18 @@ type Cache struct {
 	state                cacheState
 	inFlightTransactions []*transaction
 	evictingList         map[uint64]bool
+
+	blockAccessTracer CacheBlockAccessTracer
+}
+
+// SetBlockAccessTracer sets the tracer for monitoring block access patterns
+func (c *Cache) SetBlockAccessTracer(tracer CacheBlockAccessTracer) {
+	c.blockAccessTracer = tracer
+}
+
+// GetBlockAccessTracer returns the current block access tracer
+func (c *Cache) GetBlockAccessTracer() CacheBlockAccessTracer {
+	return c.blockAccessTracer
 }
 
 // SetLowModuleFinder sets the LowModuleFinder used by the cache.

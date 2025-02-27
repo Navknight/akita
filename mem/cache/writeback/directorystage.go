@@ -123,7 +123,9 @@ func (ds *directoryStage) handleReadMSHRHit(
 	trans.mshrEntry = mshrEntry
 	mshrEntry.Requests = append(mshrEntry.Requests, trans)
 	ds.buf.Pop()
-
+	if mshrEntry.Block != nil {
+		mshrEntry.Block.NumReadAccesses++
+	}
 	tracing.AddTaskStep(
 		tracing.MsgIDAtReceiver(trans.read, ds.cache),
 		ds.cache,
@@ -147,7 +149,7 @@ func (ds *directoryStage) handleReadHit(
 		ds.cache,
 		"read-hit",
 	)
-
+	block.NumReadAccesses++
 	// log.Printf("%.10f, %s, dir read hit， %s, %04X, %04X, (%d, %d), %v\n",
 	// 	now, ds.cache.Name(),
 	// 	trans.read.ID,
@@ -263,7 +265,9 @@ func (ds *directoryStage) doWriteMSHRHit(
 	trans.mshrEntry = mshrEntry
 	mshrEntry.Requests = append(mshrEntry.Requests, trans)
 	ds.buf.Pop()
-
+	if mshrEntry.Block != nil {
+		mshrEntry.Block.NumWriteAccesses++
+	}
 	return true
 }
 
@@ -274,7 +278,7 @@ func (ds *directoryStage) doWriteHit(
 	if block.IsLocked || block.ReadCount > 0 {
 		return false
 	}
-
+	block.NumWriteAccesses++
 	return ds.writeToBank(trans, block)
 }
 
@@ -443,6 +447,18 @@ func (ds *directoryStage) updateTransForEviction(
 	pid vm.PID,
 	cacheLineID uint64,
 ) {
+	if ds.cache.blockAccessTracer == nil {
+		panic("no block access tracer")
+	}
+	if !victim.IsValid {
+		panic("victim is not valid")
+	}
+	if ds.cache.blockAccessTracer != nil && victim.IsValid {
+		ds.cache.blockAccessTracer.RecordBlockEviction(
+			victim.NumReadAccesses,
+			victim.NumWriteAccesses)
+	}
+
 	trans.action = bankEvictAndFetch
 	trans.victim = &cache.Block{
 		PID:          victim.PID,
@@ -515,7 +531,13 @@ func (ds *directoryStage) fetch(
 	block.PID = pid
 	block.IsValid = true
 	ds.cache.directory.Visit(block)
-
+	// When a block is brought into the cache for a read, it's an access
+	if trans.read != nil {
+		block.NumReadAccesses = 1
+	} else if trans.write != nil && ds.isWritingFullLine(trans.write) {
+		// For a full-line write, count it as a write access
+		block.NumWriteAccesses = 1
+	}
 	tracing.AddTaskStep(
 		tracing.MsgIDAtReceiver(req, ds.cache),
 		ds.cache,
