@@ -125,6 +125,9 @@ func (ds *directoryStage) handleReadMSHRHit(
 	ds.buf.Pop()
 	if mshrEntry.Block != nil {
 		mshrEntry.Block.NumReadAccesses++
+		if mshrEntry.Block.NumReadAccesses == 0 {
+			panic("num read still 0 mshr")
+		}
 	}
 	tracing.AddTaskStep(
 		tracing.MsgIDAtReceiver(trans.read, ds.cache),
@@ -150,6 +153,9 @@ func (ds *directoryStage) handleReadHit(
 		"read-hit",
 	)
 	block.NumReadAccesses++
+	if block.NumReadAccesses == 0 {
+		panic("num read still 0")
+	}
 	// log.Printf("%.10f, %s, dir read hit， %s, %04X, %04X, (%d, %d), %v\n",
 	// 	now, ds.cache.Name(),
 	// 	trans.read.ID,
@@ -267,6 +273,9 @@ func (ds *directoryStage) doWriteMSHRHit(
 	ds.buf.Pop()
 	if mshrEntry.Block != nil {
 		mshrEntry.Block.NumWriteAccesses++
+		if mshrEntry.Block.NumWriteAccesses == 0 {
+			panic("num write still 0 mshr")
+		}
 	}
 	return true
 }
@@ -279,6 +288,9 @@ func (ds *directoryStage) doWriteHit(
 		return false
 	}
 	block.NumWriteAccesses++
+	if block.NumWriteAccesses == 0 {
+		panic("num write still 0 block")
+	}
 	return ds.writeToBank(trans, block)
 }
 
@@ -454,6 +466,16 @@ func (ds *directoryStage) updateTransForEviction(
 		panic("victim is not valid")
 	}
 	if ds.cache.blockAccessTracer != nil && victim.IsValid {
+		if victim.NumReadAccesses == 0 || victim.NumWriteAccesses == 0 {
+			t := ""
+			if victim.NumReadAccesses == 0 {
+				t += "read"
+			}
+			if victim.NumWriteAccesses == 0 {
+				t += "write"
+			}
+			panic("eviction of 0" + t + " accesses")
+		}
 		ds.cache.blockAccessTracer.RecordBlockEviction(
 			victim.NumReadAccesses,
 			victim.NumWriteAccesses)
@@ -501,6 +523,26 @@ func (ds *directoryStage) fetch(
 	trans *transaction,
 	block *cache.Block,
 ) bool {
+
+	if block.NumReadAccesses == 0 || block.NumWriteAccesses == 0 {
+		t := ""
+		if block.NumReadAccesses == 0 {
+			t += "read"
+		}
+		if block.NumWriteAccesses == 0 {
+			t += "write"
+		}
+		fmt.Println("fetch over 0" + t + " accesses")
+	} else {
+		fmt.Println("fetch over non 0 access !!!!!!!!!!!!!!!!")
+	}
+
+	if block.NumReadAccesses == 0 && block.NumWriteAccesses == 0 {
+		ds.cache.blockAccessTracer.RecordBlockEviction(
+			block.NumReadAccesses,
+			block.NumWriteAccesses)
+	}
+
 	var addr uint64
 	var pid vm.PID
 	var req mem.AccessReq
@@ -574,5 +616,9 @@ func (ds *directoryStage) isWritingFullLine(write *mem.WriteReq) bool {
 }
 
 func (ds *directoryStage) needEviction(victim *cache.Block) bool {
-	return victim.IsValid && victim.IsDirty
+	if victim.IsValid && victim.IsDirty {
+		panic("needs eviction")
+		return true
+	}
+	return false
 }
