@@ -156,6 +156,10 @@ func (b Builder) Build(name string) *Cache {
 	b.createInternalStages(cache)
 	b.createInternalBuffers(cache)
 
+	cache.BlockAccessDistribution = make(map[uint64]uint64)
+	cache.TotalEvictions = 0
+	cache.CumulativeAccessCount = 0
+
 	return cache
 }
 

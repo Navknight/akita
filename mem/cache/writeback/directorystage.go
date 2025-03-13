@@ -103,12 +103,14 @@ func (ds *directoryStage) doRead(
 
 	mshrEntry := ds.cache.mshr.Query(trans.read.PID, cachelineID)
 	if mshrEntry != nil {
+		mshrEntry.Block.AccessCount++
 		return ds.handleReadMSHRHit(now, trans, mshrEntry)
 	}
 
 	block := ds.cache.directory.Lookup(
 		trans.read.PID, cachelineID)
 	if block != nil {
+		block.AccessCount++
 		return ds.handleReadHit(now, trans, block)
 	}
 
@@ -219,6 +221,7 @@ func (ds *directoryStage) doWrite(
 
 	mshrEntry := ds.cache.mshr.Query(write.PID, cachelineID)
 	if mshrEntry != nil {
+		mshrEntry.Block.AccessCount++
 		ok := ds.doWriteMSHRHit(now, trans, mshrEntry)
 		tracing.AddTaskStep(
 			tracing.MsgIDAtReceiver(trans.write, ds.cache),
@@ -231,6 +234,7 @@ func (ds *directoryStage) doWrite(
 
 	block := ds.cache.directory.Lookup(trans.write.PID, cachelineID)
 	if block != nil {
+		block.AccessCount++
 		ok := ds.doWriteHit(trans, block)
 		if ok {
 			tracing.AddTaskStep(
@@ -391,6 +395,11 @@ func (ds *directoryStage) evict(
 	trans *transaction,
 	victim *cache.Block,
 ) bool {
+	  // Record access statistics before eviction
+  ds.cache.BlockAccessDistribution[victim.AccessCount]++
+  ds.cache.TotalEvictions++
+  ds.cache.CumulativeAccessCount += victim.AccessCount
+
 	bankNum := bankID(victim,
 		ds.cache.directory.WayAssociativity(), len(ds.cache.dirToBankBuffers))
 	bankBuf := ds.cache.dirToBankBuffers[bankNum]
@@ -434,6 +443,7 @@ func (ds *directoryStage) updateVictimBlockMetaData(victim *cache.Block, cacheLi
 	victim.PID = pid
 	victim.IsLocked = true
 	victim.IsDirty = false
+	victim.AccessCount = 0
 	ds.cache.directory.Visit(victim)
 }
 

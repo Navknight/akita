@@ -17,6 +17,8 @@ type Block struct {
 	ReadCount    int
 	IsLocked     bool
 	DirtyMask    []bool
+
+	AccessCount uint64
 }
 
 // A Set is a list of blocks where a certain piece memory can be stored at

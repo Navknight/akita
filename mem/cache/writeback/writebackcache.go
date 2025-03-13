@@ -4,6 +4,7 @@ import (
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
+	"fmt"
 )
 
 type cacheState int
@@ -51,6 +52,10 @@ type Cache struct {
 	state                cacheState
 	inFlightTransactions []*transaction
 	evictingList         map[uint64]bool
+
+	BlockAccessDistribution map[uint64]uint64  // Maps access count -> number of blocks with that count
+	TotalEvictions          uint64             // Total number of evictions
+	CumulativeAccessCount   uint64						// Sum of access counts all evicted blocks 
 }
 
 // SetLowModuleFinder sets the LowModuleFinder used by the cache.
@@ -125,4 +130,44 @@ func (c *Cache) discardInflightTransactions(now sim.VTimeInSec) {
 	// }
 
 	c.inFlightTransactions = nil
+}
+
+// GetBlockAccessStats returns statistics about block accesses before eviction
+// in the form of a histogram
+func (c *Cache) GetBlockAccessStats() map[string]interface{} {
+	histogram := make(map[string]int)
+	
+	// Individual buckets for 0-10
+	for i := uint64(0); i <= 10; i++ {
+		histogram[fmt.Sprintf("%d", i)] = int(c.BlockAccessDistribution[i])
+	}
+	
+	// Grouped buckets for ranges
+	for start := uint64(11); start <= 100; start += 10 {
+		end := start + 9
+		bucketName := fmt.Sprintf("%d-%d", start, end)
+		count := 0
+		
+		for i := start; i <= end; i++ {
+			count += int(c.BlockAccessDistribution[i])
+		}
+		
+		histogram[bucketName] = count
+	}
+	
+	// Bucket for >100
+	countOver100 := 0
+	for i := uint64(101); i < 1000; i++ {
+		if val, exists := c.BlockAccessDistribution[i]; exists {
+			countOver100 += int(val)
+		}
+	}
+	if countOver100 > 0 {
+		histogram[">100"] = countOver100
+	}
+	
+	return map[string]interface{}{
+		"AccessHistogram": histogram,
+		"TotalEvictions":  c.TotalEvictions,
+	}
 }
