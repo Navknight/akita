@@ -144,6 +144,11 @@ func (ds *directoryStage) handleReadHit(
 		return false
 	}
 
+	// Record access in prefetcher
+	if ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.RecordAccess(trans.read.PID, trans.read.Address)
+	}
+
 	tracing.AddTaskStep(
 		tracing.MsgIDAtReceiver(trans.read, ds.cache),
 		ds.cache,
@@ -187,6 +192,10 @@ func (ds *directoryStage) handleReadMiss(
 	// 	nil,
 	// )
 
+	if ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.RecordAccess(req.PID, req.Address)
+	}
+
 	if ds.needEviction(victim) {
 		ok := ds.evict(now, trans, victim)
 		if ok {
@@ -207,6 +216,10 @@ func (ds *directoryStage) handleReadMiss(
 			ds.cache,
 			"read-miss",
 		)
+	}
+
+	if ok && ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.TryPrefetch(req.PID, req.Address)
 	}
 
 	return ok
@@ -279,6 +292,11 @@ func (ds *directoryStage) doWriteHit(
 		return false
 	}
 
+	// Record access in prefetcher
+	if ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.RecordAccess(trans.write.PID, trans.write.Address)
+	}
+
 	return ds.writeToBank(trans, block)
 }
 
@@ -333,12 +351,23 @@ func (ds *directoryStage) writePartialLineMiss(
 	// 	victim.SetID, victim.WayID,
 	// 	write.Data,
 	// )
-
-	if ds.needEviction(victim) {
-		return ds.evict(now, trans, victim)
+	if ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.RecordAccess(write.PID, write.Address)
 	}
 
-	return ds.fetch(now, trans, victim)
+	var success bool
+	if ds.needEviction(victim) {
+		success = ds.evict(now, trans, victim)
+	} else {
+		success = ds.fetch(now, trans, victim)
+	}
+
+	// Try prefetching if the write miss was handled successfully
+	if success && ds.cache.prefetcher != nil {
+		ds.cache.prefetcher.TryPrefetch(write.PID, write.Address)
+	}
+
+	return success
 }
 
 func (ds *directoryStage) readFromBank(
@@ -395,10 +424,10 @@ func (ds *directoryStage) evict(
 	trans *transaction,
 	victim *cache.Block,
 ) bool {
-	  // Record access statistics before eviction
-  ds.cache.BlockAccessDistribution[victim.AccessCount]++
-  ds.cache.TotalEvictions++
-  ds.cache.CumulativeAccessCount += victim.AccessCount
+	// Record access statistics before eviction
+	ds.cache.BlockAccessDistribution[victim.AccessCount]++
+	ds.cache.TotalEvictions++
+	ds.cache.CumulativeAccessCount += victim.AccessCount
 
 	bankNum := bankID(victim,
 		ds.cache.directory.WayAssociativity(), len(ds.cache.dirToBankBuffers))

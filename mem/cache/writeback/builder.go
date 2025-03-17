@@ -31,6 +31,9 @@ type Builder struct {
 
 	dirLatency  int
 	bankLatency int
+
+	prefetcherEnabled bool
+	prefetchDegree    int
 }
 
 // MakeBuilder creates a new builder with default configurations.
@@ -46,7 +49,22 @@ func MakeBuilder() Builder {
 		maxInflightFetch:    128,
 		maxInflightEviction: 128,
 		bankLatency:         10,
+		prefetcherEnabled:   false, // Prefetcher disabled by default
+		prefetchDegree:      2,     // Prefetch 2 addresses at once when enabled
+
 	}
+}
+
+// WithPrefetcherEnabled enables or disables the stride prefetcher
+func (b Builder) WithPrefetcherEnabled(enabled bool) Builder {
+	b.prefetcherEnabled = enabled
+	return b
+}
+
+// WithPrefetchDegree sets the number of addresses to prefetch at once
+func (b Builder) WithPrefetchDegree(degree int) Builder {
+	b.prefetchDegree = degree
+	return b
 }
 
 // WithEngine sets the engine to be used by the caches.
@@ -155,6 +173,16 @@ func (b Builder) Build(name string) *Cache {
 	b.createPortSenders(cache)
 	b.createInternalStages(cache)
 	b.createInternalBuffers(cache)
+
+	//TODO: add proper flags for this
+	b.prefetcherEnabled = true
+
+	// Create the prefetcher if enabled
+	if b.prefetcherEnabled {
+		cache.prefetcher = NewStridePrefetcher(cache, b.prefetchDegree)
+	} else {
+		panic("prefetcher not enabled")
+	}
 
 	cache.BlockAccessDistribution = make(map[uint64]uint64)
 	cache.TotalEvictions = 0
