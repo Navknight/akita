@@ -21,6 +21,8 @@ type StridePrefetcher struct {
 
 	// Maximum number of pages to track per process
 	maxTrackedPages int
+
+	log2PageSize int
 }
 
 // strideInfo tracks information about memory access patterns for a page
@@ -50,7 +52,8 @@ func NewStridePrefetcher(cache *Cache, degree int) *StridePrefetcher {
 		cache:           cache,
 		degree:          degree,
 		accessHistory:   make(map[vm.PID]map[uint64]*strideInfo),
-		maxTrackedPages: 16, // Track up to 16 pages per process
+		maxTrackedPages: 16, // Track up to 16 pages per process,
+		log2PageSize:    20,
 	}
 }
 
@@ -65,7 +68,7 @@ func (p *StridePrefetcher) RecordAccess(pid vm.PID, addr uint64) {
 	}
 
 	// Track at page granularity (4KB pages)
-	pageAddr := lineAddr >> 12
+	pageAddr := lineAddr >> uint64(p.log2PageSize)
 	info, ok := p.accessHistory[pid][pageAddr]
 
 	if !ok {
@@ -146,9 +149,8 @@ func (p *StridePrefetcher) RecordAccess(pid vm.PID, addr uint64) {
 // TryPrefetch attempts to prefetch data based on stride patterns
 // Returns true if any prefetch request was issued
 func (p *StridePrefetcher) TryPrefetch(pid vm.PID, addr uint64) bool {
-	fmt.Println("trying prefetch")
 	lineAddr, _ := getCacheLineID(addr, p.cache.log2BlockSize)
-	pageAddr := lineAddr >> 12
+	pageAddr := lineAddr >> uint64(p.log2PageSize)
 
 	// Check if we have stride info with sufficient confidence
 	if pidMap, ok := p.accessHistory[pid]; ok {
@@ -165,7 +167,7 @@ func (p *StridePrefetcher) TryPrefetch(pid vm.PID, addr uint64) bool {
 				nextAddr := lineAddr + uint64(info.stride)
 				for i := 0; i < p.degree; i++ {
 					// Check if the address would be in the same or adjacent page
-					nextPageAddr := nextAddr >> 12
+					nextPageAddr := nextAddr >> uint64(p.log2PageSize)
 					if (nextPageAddr == pageAddr || nextPageAddr == pageAddr+1) &&
 						nextAddr != lineAddr {
 						// Attempt to prefetch this address

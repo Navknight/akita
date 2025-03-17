@@ -179,10 +179,11 @@ func (b Builder) Build(name string) *Cache {
 
 	// Create the prefetcher if enabled
 	if b.prefetcherEnabled {
-		cache.prefetcher = NewStridePrefetcher(cache, b.prefetchDegree)
-	} else {
-		panic("prefetcher not enabled")
+		cache.prefetcher = NewStridePrefetcher(cache, b.prefetchDegree, 20)
 	}
+	//infinite cache
+	cache.infiniteCacheMap = make(map[uint64]bool)
+	cache.totalAccesses = 0
 
 	cache.BlockAccessDistribution = make(map[uint64]uint64)
 	cache.TotalEvictions = 0

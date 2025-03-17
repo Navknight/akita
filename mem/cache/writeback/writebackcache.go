@@ -60,6 +60,10 @@ type Cache struct {
 
 	// Stride prefetcher
 	prefetcher *StridePrefetcher
+
+	//infinite Cache
+	infiniteCacheMap map[uint64]bool
+	totalAccesses    uint64
 }
 
 // SetLowModuleFinder sets the LowModuleFinder used by the cache.
@@ -173,5 +177,15 @@ func (c *Cache) GetBlockAccessStats() map[string]interface{} {
 	return map[string]interface{}{
 		"AccessHistogram": histogram,
 		"TotalEvictions":  c.TotalEvictions,
+	}
+}
+
+func (c *Cache) GetInfiniteCacheStats() map[string]interface{} {
+	uniqueAddresses := len(c.infiniteCacheMap)
+
+	return map[string]interface{}{
+		"TotalAccesses":   c.totalAccesses,
+		"UniqueAddresses": uniqueAddresses,
+		"TheoreticalHits": c.totalAccesses - uint64(uniqueAddresses),
 	}
 }

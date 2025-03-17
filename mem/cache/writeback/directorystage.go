@@ -101,8 +101,11 @@ func (ds *directoryStage) doRead(
 	cachelineID, _ := getCacheLineID(
 		trans.read.Address, ds.cache.log2BlockSize)
 
+	ds.cache.infiniteCacheMap[cachelineID] = true
+
 	mshrEntry := ds.cache.mshr.Query(trans.read.PID, cachelineID)
 	if mshrEntry != nil {
+		ds.cache.totalAccesses++
 		mshrEntry.Block.AccessCount++
 		return ds.handleReadMSHRHit(now, trans, mshrEntry)
 	}
@@ -111,6 +114,7 @@ func (ds *directoryStage) doRead(
 		trans.read.PID, cachelineID)
 	if block != nil {
 		block.AccessCount++
+		ds.cache.totalAccesses++
 		return ds.handleReadHit(now, trans, block)
 	}
 
@@ -196,33 +200,19 @@ func (ds *directoryStage) handleReadMiss(
 		ds.cache.prefetcher.RecordAccess(req.PID, req.Address)
 	}
 
+	var success bool
 	if ds.needEviction(victim) {
-		ok := ds.evict(now, trans, victim)
-		if ok {
-			tracing.AddTaskStep(
-				tracing.MsgIDAtReceiver(trans.read, ds.cache),
-				ds.cache,
-				"read-miss",
-			)
-		}
-
-		return ok
+		success = ds.evict(now, trans, victim)
+	} else {
+		success = ds.fetch(now, trans, victim)
 	}
 
-	ok := ds.fetch(now, trans, victim)
-	if ok {
-		tracing.AddTaskStep(
-			tracing.MsgIDAtReceiver(trans.read, ds.cache),
-			ds.cache,
-			"read-miss",
-		)
-	}
-
-	if ok && ds.cache.prefetcher != nil {
+	// Try prefetching if the read miss was handled successfully
+	if success && ds.cache.prefetcher != nil {
 		ds.cache.prefetcher.TryPrefetch(req.PID, req.Address)
 	}
 
-	return ok
+	return success
 }
 
 func (ds *directoryStage) doWrite(
@@ -232,8 +222,11 @@ func (ds *directoryStage) doWrite(
 	write := trans.write
 	cachelineID, _ := getCacheLineID(write.Address, ds.cache.log2BlockSize)
 
+	ds.cache.infiniteCacheMap[cachelineID] = true
+
 	mshrEntry := ds.cache.mshr.Query(write.PID, cachelineID)
 	if mshrEntry != nil {
+		ds.cache.totalAccesses++
 		mshrEntry.Block.AccessCount++
 		ok := ds.doWriteMSHRHit(now, trans, mshrEntry)
 		tracing.AddTaskStep(
@@ -248,6 +241,7 @@ func (ds *directoryStage) doWrite(
 	block := ds.cache.directory.Lookup(trans.write.PID, cachelineID)
 	if block != nil {
 		block.AccessCount++
+		ds.cache.totalAccesses++
 		ok := ds.doWriteHit(trans, block)
 		if ok {
 			tracing.AddTaskStep(

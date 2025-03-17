@@ -22,7 +22,7 @@ func MakeBuilder() Builder {
 	return Builder{
 		freq:           1 * sim.GHz,
 		numReqPerCycle: 4,
-		log2PageSize:   12,
+		log2PageSize:   20,
 		deviceID:       1,
 	}
 }
