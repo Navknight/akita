@@ -33,6 +33,8 @@ type Cache struct {
 	respondStage     *respondStage
 	controlStage     *controlStage
 
+	Prefetcher *StridePrefetcher
+
 	maxNumConcurrentTrans    int
 	transactions             []*transaction
 	postCoalesceTransactions []*transaction

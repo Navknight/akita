@@ -25,6 +25,7 @@ type Builder struct {
 	maxNumConcurrentTrans int
 	lowModuleFinder       mem.LowModuleFinder
 	visTracer             tracing.Tracer
+	prefetcherDegree      int
 }
 
 // NewBuilder creates a builder with default parameter setting
@@ -40,12 +41,18 @@ func NewBuilder() *Builder {
 		maxNumConcurrentTrans: 16,
 		dirLatency:            2,
 		bankLatency:           20,
+		prefetcherDegree:      0,
 	}
 }
 
 // WithEngine sets the event driven simulation engine that the cache uses
 func (b *Builder) WithEngine(engine sim.Engine) *Builder {
 	b.engine = engine
+	return b
+}
+
+func (b *Builder) WithPrefetcher(degree int) *Builder {
+	b.prefetcherDegree = degree
 	return b
 }
 
@@ -139,6 +146,11 @@ func (b *Builder) Build(name string) *Cache {
 	c.TickingComponent = sim.NewTickingComponent(
 		name, b.engine, b.freq, c)
 
+	if b.prefetcherDegree > 0 {
+		c.Prefetcher = NewStridePrefetcher(c, b.prefetcherDegree)
+	} else {
+		panic("no l1 prefetcher")
+	}
 	c.topPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle, name+".TopPort")
 	c.AddPort("Top", c.topPort)
 	c.bottomPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle,

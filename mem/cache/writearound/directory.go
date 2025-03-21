@@ -69,6 +69,11 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 	blockSize := uint64(1 << d.cache.log2BlockSize)
 	cacheLineID := addr / blockSize * blockSize
 
+	// Record access for prefetcher
+	if d.cache.Prefetcher != nil {
+		d.cache.Prefetcher.RecordAccess(pid, addr)
+	}
+
 	mshrEntry := d.cache.mshr.Query(pid, cacheLineID)
 	if mshrEntry != nil {
 		return d.processMSHRHit(now, trans, mshrEntry)
@@ -77,6 +82,11 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 	block := d.cache.directory.Lookup(pid, cacheLineID)
 	if block != nil && block.IsValid {
 		return d.processReadHit(now, trans, block)
+	}
+
+	// Try prefetching on read miss
+	if d.cache.Prefetcher != nil {
+		d.cache.Prefetcher.TryPrefetch(now, pid, addr)
 	}
 
 	return d.processReadMiss(now, trans)
@@ -114,6 +124,11 @@ func (d *directory) processReadHit(
 		return false
 	}
 
+	if block.WasPrefetched && d.cache.Prefetcher != nil {
+		d.cache.Prefetcher.prefetchHits++
+		block.WasPrefetched = false
+	}
+
 	trans.block = block
 	trans.bankAction = bankActionReadHit
 	block.ReadCount++
@@ -138,6 +153,11 @@ func (d *directory) processReadMiss(
 	victim := d.cache.directory.FindVictim(cacheLineID)
 	if victim.IsLocked || victim.ReadCount > 0 {
 		return false
+	}
+
+	if victim.WasPrefetched && d.cache.Prefetcher != nil {
+		victim.WasPrefetched = false
+		d.cache.Prefetcher.prefetchMisses++
 	}
 
 	if d.cache.mshr.IsFull() {
@@ -172,7 +192,9 @@ func (d *directory) processWrite(
 		}
 		return false
 	}
-
+	if d.cache.Prefetcher != nil {
+		d.cache.Prefetcher.RecordAccess(pid, addr)
+	}
 	block := d.cache.directory.Lookup(pid, cacheLineID)
 	if block != nil && block.IsValid {
 		return d.processWriteHit(now, trans, block)
@@ -249,6 +271,11 @@ func (d *directory) processWriteHit(
 	block.IsValid = true
 	block.Tag = cacheLineID
 	d.cache.directory.Visit(block)
+
+	if block.WasPrefetched && d.cache.Prefetcher != nil {
+		block.WasPrefetched = false
+		d.cache.Prefetcher.prefetchHits++
+	}
 
 	trans.bankAction = bankActionWrite
 	trans.block = block

@@ -7,18 +7,18 @@ import (
 
 // A Block of a cache is the information that is associated with a cache line
 type Block struct {
-	PID          vm.PID
-	Tag          uint64
-	WayID        int
-	SetID        int
-	CacheAddress uint64
-	IsValid      bool
-	IsDirty      bool
-	ReadCount    int
-	IsLocked     bool
-	DirtyMask    []bool
-
-	AccessCount uint64
+	PID           vm.PID
+	Tag           uint64
+	WayID         int
+	SetID         int
+	CacheAddress  uint64
+	IsValid       bool
+	IsDirty       bool
+	ReadCount     int
+	IsLocked      bool
+	DirtyMask     []bool
+	WasPrefetched bool
+	AccessCount   uint64
 }
 
 // A Set is a list of blocks where a certain piece memory can be stored at
@@ -36,6 +36,7 @@ type Directory interface {
 	WayAssociativity() int
 	GetSets() []Set
 	Reset()
+	GetPrefetchedBlockCount() float64
 }
 
 // A DirectoryImpl is the default implementation of a Directory
@@ -145,4 +146,17 @@ func (d *DirectoryImpl) Reset() {
 // WayAssociativity returns the number of ways per set in the cache.
 func (d *DirectoryImpl) WayAssociativity() int {
 	return d.NumWays
+}
+
+func (d *DirectoryImpl) GetPrefetchedBlockCount() float64 {
+	count := 0
+	for _, set := range d.Sets {
+		for _, block := range set.Blocks {
+			if block.WasPrefetched && block.IsValid {
+				count++
+			}
+		}
+	}
+
+	return float64(count)
 }
