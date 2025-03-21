@@ -63,6 +63,7 @@ type Cache struct {
 
 	//infinite Cache
 	infiniteCacheMap map[uint64]bool
+	infiniteCache    bool
 	totalAccesses    uint64
 }
 

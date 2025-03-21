@@ -101,11 +101,16 @@ func (ds *directoryStage) doRead(
 	cachelineID, _ := getCacheLineID(
 		trans.read.Address, ds.cache.log2BlockSize)
 
-	ds.cache.infiniteCacheMap[cachelineID] = true
+	if ds.cache.infiniteCache {
+		ds.cache.infiniteCacheMap[cachelineID] = true
+	}
 
 	mshrEntry := ds.cache.mshr.Query(trans.read.PID, cachelineID)
 	if mshrEntry != nil {
-		ds.cache.totalAccesses++
+		if ds.cache.infiniteCache {
+
+			ds.cache.totalAccesses++
+		}
 		mshrEntry.Block.AccessCount++
 		return ds.handleReadMSHRHit(now, trans, mshrEntry)
 	}
@@ -114,7 +119,9 @@ func (ds *directoryStage) doRead(
 		trans.read.PID, cachelineID)
 	if block != nil {
 		block.AccessCount++
-		ds.cache.totalAccesses++
+		if ds.cache.infiniteCache {
+			ds.cache.totalAccesses++
+		}
 		return ds.handleReadHit(now, trans, block)
 	}
 
@@ -221,12 +228,15 @@ func (ds *directoryStage) doWrite(
 ) bool {
 	write := trans.write
 	cachelineID, _ := getCacheLineID(write.Address, ds.cache.log2BlockSize)
-
-	ds.cache.infiniteCacheMap[cachelineID] = true
+	if ds.cache.infiniteCache {
+		ds.cache.infiniteCacheMap[cachelineID] = true
+	}
 
 	mshrEntry := ds.cache.mshr.Query(write.PID, cachelineID)
 	if mshrEntry != nil {
-		ds.cache.totalAccesses++
+		if ds.cache.infiniteCache {
+			ds.cache.totalAccesses++
+		}
 		mshrEntry.Block.AccessCount++
 		ok := ds.doWriteMSHRHit(now, trans, mshrEntry)
 		tracing.AddTaskStep(
@@ -241,7 +251,9 @@ func (ds *directoryStage) doWrite(
 	block := ds.cache.directory.Lookup(trans.write.PID, cachelineID)
 	if block != nil {
 		block.AccessCount++
-		ds.cache.totalAccesses++
+		if ds.cache.infiniteCache {
+			ds.cache.totalAccesses++
+		}
 		ok := ds.doWriteHit(trans, block)
 		if ok {
 			tracing.AddTaskStep(

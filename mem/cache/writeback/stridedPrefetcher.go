@@ -52,8 +52,8 @@ func NewStridePrefetcher(cache *Cache, degree int) *StridePrefetcher {
 		cache:           cache,
 		degree:          degree,
 		accessHistory:   make(map[vm.PID]map[uint64]*strideInfo),
-		maxTrackedPages: 16, // Track up to 16 pages per process,
-		log2PageSize:    20,
+		maxTrackedPages: 16,
+		log2PageSize:    12,
 	}
 }
 

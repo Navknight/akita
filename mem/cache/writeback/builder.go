@@ -32,8 +32,9 @@ type Builder struct {
 	dirLatency  int
 	bankLatency int
 
-	prefetcherEnabled bool
-	prefetchDegree    int
+	prefetcherEnabled int
+
+	infiniteCache bool
 }
 
 // MakeBuilder creates a new builder with default configurations.
@@ -49,21 +50,18 @@ func MakeBuilder() Builder {
 		maxInflightFetch:    128,
 		maxInflightEviction: 128,
 		bankLatency:         10,
-		prefetcherEnabled:   false, // Prefetcher disabled by default
-		prefetchDegree:      2,     // Prefetch 2 addresses at once when enabled
-
+		prefetcherEnabled:   0,
 	}
 }
 
 // WithPrefetcherEnabled enables or disables the stride prefetcher
-func (b Builder) WithPrefetcherEnabled(enabled bool) Builder {
-	b.prefetcherEnabled = enabled
+func (b Builder) WithPrefetcherEnabled(degree int) Builder {
+	b.prefetcherEnabled = degree
 	return b
 }
 
-// WithPrefetchDegree sets the number of addresses to prefetch at once
-func (b Builder) WithPrefetchDegree(degree int) Builder {
-	b.prefetchDegree = degree
+func (b Builder) WithInfiniteCache() Builder {
+	b.infiniteCache = true
 	return b
 }
 
@@ -174,16 +172,15 @@ func (b Builder) Build(name string) *Cache {
 	b.createInternalStages(cache)
 	b.createInternalBuffers(cache)
 
-	//TODO: add proper flags for this
-	b.prefetcherEnabled = true
-
-	// Create the prefetcher if enabled
-	if b.prefetcherEnabled {
-		cache.prefetcher = NewStridePrefetcher(cache, b.prefetchDegree, 20)
+	if b.prefetcherEnabled > 0 {
+		cache.prefetcher = NewStridePrefetcher(cache, b.prefetcherEnabled)
 	}
 	//infinite cache
-	cache.infiniteCacheMap = make(map[uint64]bool)
-	cache.totalAccesses = 0
+	if b.infiniteCache {
+		cache.infiniteCache = true
+		cache.infiniteCacheMap = make(map[uint64]bool)
+		cache.totalAccesses = 0
+	}
 
 	cache.BlockAccessDistribution = make(map[uint64]uint64)
 	cache.TotalEvictions = 0
