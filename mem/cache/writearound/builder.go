@@ -148,8 +148,6 @@ func (b *Builder) Build(name string) *Cache {
 
 	if b.prefetcherDegree > 0 {
 		c.Prefetcher = NewStridePrefetcher(c, b.prefetcherDegree)
-	} else {
-		panic("no l1 prefetcher")
 	}
 	c.topPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle, name+".TopPort")
 	c.AddPort("Top", c.topPort)
