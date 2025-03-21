@@ -12,6 +12,7 @@ type Builder struct {
 	pageSize       uint64
 	lowModule      sim.Port
 	numMSHREntry   int
+	lookupLatency  int
 }
 
 // MakeBuilder returns a Builder
@@ -23,7 +24,13 @@ func MakeBuilder() Builder {
 		numWays:        32,
 		pageSize:       4096,
 		numMSHREntry:   4,
+		lookupLatency:  1,
 	}
+}
+
+func (b Builder) WithLookupLatency(latency int) Builder {
+	b.lookupLatency = latency
+	return b
 }
 
 // WithEngine sets the engine that the TLBs to use
@@ -90,7 +97,7 @@ func (b Builder) Build(name string) *TLB {
 	tlb.pageSize = b.pageSize
 	tlb.LowModule = b.lowModule
 	tlb.mshr = newMSHR(b.numMSHREntry)
-
+	tlb.lookupLatency = b.lookupLatency
 	b.createPorts(name, tlb)
 
 	tlb.reset()

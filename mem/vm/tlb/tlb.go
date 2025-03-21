@@ -30,7 +30,15 @@ type TLB struct {
 	mshr                mshr
 	respondingMSHREntry *mshrEntry
 
-	isPaused bool
+	isPaused      bool
+	pendingHits   []pendingHitResponse
+	lookupLatency int
+}
+
+type pendingHitResponse struct {
+	req        *vm.TranslationReq
+	page       vm.Page
+	cyclesLeft int
 }
 
 // Reset sets all the entries int he TLB to be invalid
@@ -40,6 +48,8 @@ func (tlb *TLB) reset() {
 		set := internal.NewSet(tlb.numWays)
 		tlb.Sets[i] = set
 	}
+
+	tlb.pendingHits = []pendingHitResponse{}
 }
 
 // Tick defines how TLB update states at each cycle
@@ -49,6 +59,10 @@ func (tlb *TLB) Tick(now sim.VTimeInSec) bool {
 	madeProgress = tlb.performCtrlReq(now) || madeProgress
 
 	if !tlb.isPaused {
+		for i := 0; i < tlb.numReqPerCycle; i++ {
+			madeProgress = tlb.processPendingHits(now) || madeProgress
+		}
+
 		for i := 0; i < tlb.numReqPerCycle; i++ {
 			madeProgress = tlb.respondMSHREntry(now) || madeProgress
 		}
@@ -123,17 +137,25 @@ func (tlb *TLB) handleTranslationHit(
 	setID, wayID int,
 	page vm.Page,
 ) bool {
-	ok := tlb.sendRspToTop(now, req, page)
-	if !ok {
-		return false
-	}
+	// Queue the hit for later response after delay
+	tlb.pendingHits = append(tlb.pendingHits, pendingHitResponse{
+		req:        req,
+		page:       page,
+		cyclesLeft: tlb.lookupLatency, // 10-cycle delay
+	})
+
+	// ok := tlb.sendRspToTop(now, req, page)
+	// if !ok {
+	// 	return false
+	// }
 
 	tlb.visit(setID, wayID)
 	tlb.topPort.Retrieve(now)
 
 	tracing.TraceReqReceive(req, tlb)
-	tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "hit")
-	tracing.TraceReqComplete(req, tlb)
+	tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "hit-queued")
+	// tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "hit")
+	// tracing.TraceReqComplete(req, tlb)
 
 	return true
 }
@@ -333,4 +355,38 @@ func (tlb *TLB) handleTLBRestart(now sim.VTimeInSec, req *RestartReq) bool {
 	}
 
 	return true
+}
+
+func (tlb *TLB) processPendingHits(now sim.VTimeInSec) bool {
+	if len(tlb.pendingHits) == 0 {
+		return false
+	}
+
+	madeProgress := false
+	var remainingHits []pendingHitResponse
+
+	for i := range tlb.pendingHits {
+		entry := &tlb.pendingHits[i]
+		entry.cyclesLeft--
+
+		if entry.cyclesLeft <= 0 {
+			// Ready to respond
+			ok := tlb.sendRspToTop(now, entry.req, entry.page)
+			if ok {
+				tracing.AddTaskStep(tracing.MsgIDAtReceiver(entry.req, tlb), tlb, "hit-responded")
+				tracing.TraceReqComplete(entry.req, tlb)
+				madeProgress = true
+			} else {
+				// Port busy, try again next cycle
+				entry.cyclesLeft = 0 // Keep at 0 so we try again next cycle
+				remainingHits = append(remainingHits, *entry)
+			}
+		} else {
+			// Still waiting
+			remainingHits = append(remainingHits, *entry)
+		}
+	}
+
+	tlb.pendingHits = remainingHits
+	return madeProgress
 }
