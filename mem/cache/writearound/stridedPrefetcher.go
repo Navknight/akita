@@ -1,8 +1,11 @@
 package writearound
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/mem/vm"
@@ -20,6 +23,7 @@ type StridePrefetcher struct {
 	log2PageSize    int
 	enabled         bool
 	logger          *log.Logger
+	logFile         *os.File
 
 	prefetchHits         uint64
 	prefetchMisses       uint64
@@ -39,13 +43,23 @@ type strideInfo struct {
 
 // NewStridePrefetcher creates a stride prefetcher for the given cache
 func NewStridePrefetcher(cache *Cache, degree int) *StridePrefetcher {
-	// Create a log file
-	logFile, err := os.OpenFile("stride_prefetcher.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	// Create logs directory if it doesn't exist
+	logsDir := "prefetcher_logs"
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		panic(err)
+	}
+
+	// Create a unique log file with timestamp and degree
+	timestamp := time.Now().Format("20060102_150405")
+	logFileName := filepath.Join(logsDir, fmt.Sprintf("stride_prefetcher_deg%d_%s.log", degree, timestamp))
+
+	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		panic(err)
 	}
 
 	logger := log.New(logFile, "", log.LstdFlags)
+	logger.Printf("NEW_PREFETCHER Degree:%d MaxTrackedPages:16 PageSize:4KB", degree)
 
 	return &StridePrefetcher{
 		cache:                cache,
@@ -55,6 +69,7 @@ func NewStridePrefetcher(cache *Cache, degree int) *StridePrefetcher {
 		log2PageSize:         12, // 4KB pages
 		enabled:              true,
 		logger:               logger,
+		logFile:              logFile,
 		prefetchHits:         0,
 		prefetchMisses:       0,
 		totalPrefetches:      0,
@@ -172,10 +187,12 @@ func (p *StridePrefetcher) TryPrefetch(now sim.VTimeInSec, pid vm.PID, addr uint
 						// Attempt to prefetch this address
 						if p.issuePrefetch(now, pid, nextAddr) {
 							madeProgress = true
-							p.logger.Printf("PREFETCH_ISSUED ADDR:%x", nextAddr)
+							p.logger.Printf("PREFETCH_ISSUED ADDR:%x DEGREE:%d", nextAddr, i+1)
 						}
 						nextAddr = nextAddr + uint64(info.stride)
 					} else {
+						p.logger.Printf("PAGE_BOUNDARY_BREAK ADDR:%x PAGE:%x NEXT_PAGE:%x",
+							nextAddr, pageAddr, nextPageAddr)
 						break
 					}
 				}
@@ -286,6 +303,33 @@ func (p *StridePrefetcher) issuePrefetch(now sim.VTimeInSec, pid vm.PID, addr ui
 
 	p.logger.Printf("PREFETCH_TRANS ADDR:%x", lineAddr)
 	return true
+}
+
+// RecordPrefetchHit should be called when a prefetched block is hit
+func (p *StridePrefetcher) RecordPrefetchHit() {
+	p.prefetchHits++
+	p.logger.Printf("PREFETCH_HIT Total:%d", p.prefetchHits)
+}
+
+// RecordPrefetchComplete should be called when a prefetch request completes
+func (p *StridePrefetcher) RecordPrefetchComplete() {
+	p.completedPrefetcher++
+	p.logger.Printf("PREFETCH_COMPLETE Total:%d", p.completedPrefetcher)
+}
+
+// Cleanup should be called when the prefetcher is no longer needed
+func (p *StridePrefetcher) Cleanup() {
+	// Log final statistics
+	p.logger.Printf("FINAL_STATS PrefetchHits:%d PrefetchMisses:%d TotalPrefetches:%d SuccessfulPrefetches:%d CompletedPrefetches:%d",
+		p.prefetchHits, p.prefetchMisses, p.totalPrefetches, p.successfulPrefetches, p.completedPrefetcher)
+
+	p.logger.Printf("FINAL_METRICS Accuracy:%.2f%% SuccessRate:%.2f%% InCacheCount:%.0f",
+		p.GetPrefetchAccuracy(), float64(p.successfulPrefetches)/float64(p.totalPrefetches)*100.0, p.GetInCache())
+
+	// Close the log file
+	if p.logFile != nil {
+		p.logFile.Close()
+	}
 }
 
 func (p *StridePrefetcher) GetPrefetchHits() uint64 {
