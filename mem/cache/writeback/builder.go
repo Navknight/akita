@@ -275,7 +275,7 @@ func (b *Builder) buildDirectoryStage(cache *Cache) {
 	pipeline := pipelining.
 		MakeBuilder().
 		WithCyclePerStage(1).
-		WithNumStage(b.dirLatency).
+		WithNumStage(1000).
 		WithPipelineWidth(b.numReqPerCycle).
 		WithPostPipelineBuffer(buf).
 		Build(cache.Name() + ".BankPipeline")

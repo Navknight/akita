@@ -213,7 +213,7 @@ func (b *Builder) buildDirStage(c *Cache) {
 	pipelineName := fmt.Sprintf("%s.Directory.Pipeline", c.Name())
 	pipeline := pipelining.MakeBuilder().
 		WithPipelineWidth(b.numReqPerCycle).
-		WithNumStage(b.dirLatency).
+		WithNumStage(100).
 		WithCyclePerStage(1).
 		WithPostPipelineBuffer(buf).
 		Build(pipelineName)

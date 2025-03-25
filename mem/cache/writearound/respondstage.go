@@ -15,15 +15,30 @@ func (s *respondStage) Tick(now sim.VTimeInSec) bool {
 		return false
 	}
 
-	for _, trans := range s.cache.transactions {
+	for i, trans := range s.cache.transactions {
 		if !trans.done {
 			continue
 		}
 
-		if trans.read != nil {
+		// Handle prefetch transactions specially
+		if trans.isPrefetch {
+			// Just remove the transaction without sending a response
+			s.cache.transactions = append(s.cache.transactions[:i],
+				s.cache.transactions[i+1:]...)
+
+			// Verify the transaction was properly removed
+			for _, t := range s.cache.transactions {
+				if t == trans {
+					panic("Prefetch transaction wasn't properly removed")
+				}
+			}
+
+			return true
+		} else if trans.read != nil {
 			return s.respondReadTrans(now, trans)
+		} else {
+			return s.respondWriteTrans(now, trans)
 		}
-		return s.respondWriteTrans(now, trans)
 	}
 
 	return false

@@ -1,6 +1,8 @@
 package writearound
 
 import (
+	"fmt"
+
 	"github.com/sarchlab/akita/v3/pipelining"
 	"github.com/sarchlab/akita/v3/sim"
 	"github.com/sarchlab/akita/v3/tracing"
@@ -146,6 +148,18 @@ func (s *bankStage) finalizeWriteFetchedTrans(
 ) bool {
 	block := trans.block
 
+	// Verify block validity
+	if block == nil {
+		panic("Null block in finalizeWriteFetchedTrans")
+	}
+
+	// Ensure data length matches block size
+	expectedSize := uint64(1 << s.cache.log2BlockSize)
+	if uint64(len(trans.data)) != expectedSize {
+		panic(fmt.Sprintf("Data length mismatch in bank stage: expected %d, got %d",
+			expectedSize, len(trans.data)))
+	}
+
 	err := s.cache.storage.Write(block.CacheAddress, trans.data)
 	if err != nil {
 		panic(err)
@@ -154,9 +168,14 @@ func (s *bankStage) finalizeWriteFetchedTrans(
 	block.DirtyMask = trans.writeFetchedDirtyMask
 	block.IsLocked = false
 
+	// Verify block is now unlocked
+	if block.IsLocked {
+		panic("Block is still locked after finalizeWriteFetchedTrans")
+	}
+
 	s.postPipelineBuf.Pop()
 
-	if block.WasPrefetched {
+	if block.WasPrefetched && s.cache.Prefetcher != nil {
 		s.cache.Prefetcher.completedPrefetcher++
 	}
 

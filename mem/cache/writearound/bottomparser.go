@@ -1,6 +1,8 @@
 package writearound
 
 import (
+	"fmt"
+
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -115,12 +117,39 @@ func (p *bottomParser) finalizeMSHRTrans(
 	data []byte,
 	now sim.VTimeInSec,
 ) {
+	// Separate demand and prefetch requests for better control
+	demandRequests := []*transaction{}
+	prefetchRequests := []*transaction{}
+
 	for _, t := range mshrEntry.Requests {
 		trans := t.(*transaction)
+		if trans.isPrefetch {
+			prefetchRequests = append(prefetchRequests, trans)
+		} else {
+			demandRequests = append(demandRequests, trans)
+		}
+	}
+
+	// Process demand requests first
+	for _, trans := range demandRequests {
 		if trans.read != nil {
+			// Verify the data length meets the block size requirement
+			expectedSize := uint64(1 << p.cache.log2BlockSize)
+			if uint64(len(data)) != expectedSize {
+				panic(fmt.Sprintf("Data length mismatch: expected %d bytes, got %d bytes",
+					expectedSize, len(data)))
+			}
+
 			for _, preCTrans := range trans.preCoalesceTransactions {
 				read := preCTrans.read
 				offset := read.Address - mshrEntry.Block.Tag
+
+				// Range check to catch offset calculation errors
+				if offset >= uint64(len(data)) || offset+read.AccessByteSize > uint64(len(data)) {
+					panic(fmt.Sprintf("Out of bounds access: offset=%d, size=%d, data_len=%d",
+						offset, read.AccessByteSize, len(data)))
+				}
+
 				preCTrans.data = data[offset : offset+read.AccessByteSize]
 				preCTrans.done = true
 			}
@@ -130,7 +159,19 @@ func (p *bottomParser) finalizeMSHRTrans(
 			}
 		}
 		p.removeTransaction(trans)
+		tracing.EndTask(trans.id, p.cache)
+	}
 
+	// If we had both prefetch and demand requests, record a prefetch hit
+	if len(demandRequests) > 0 && len(prefetchRequests) > 0 && p.cache.Prefetcher != nil {
+		p.cache.Prefetcher.RecordPrefetchHit()
+	}
+
+	// Process prefetch requests
+	for _, trans := range prefetchRequests {
+		// Mark prefetch as done so it can be cleaned up properly
+		trans.done = true
+		p.removeTransaction(trans)
 		tracing.EndTask(trans.id, p.cache)
 	}
 }

@@ -33,7 +33,8 @@ type Cache struct {
 	respondStage     *respondStage
 	controlStage     *controlStage
 
-	Prefetcher *StridePrefetcher
+	Prefetcher          *StridePrefetcher
+	lastPrefetcherCheck sim.VTimeInSec
 
 	maxNumConcurrentTrans    int
 	transactions             []*transaction
@@ -51,6 +52,12 @@ func (c *Cache) SetLowModuleFinder(lmf mem.LowModuleFinder) {
 // Tick update the state of the cache
 func (c *Cache) Tick(now sim.VTimeInSec) bool {
 	madeProgress := false
+
+	// Run prefetcher assertions periodically
+	if c.Prefetcher != nil && now > c.lastPrefetcherCheck+0.0001 {
+		c.Prefetcher.AssertInvariants()
+		c.lastPrefetcherCheck = now
+	}
 
 	if !c.isPaused {
 		madeProgress = c.runPipeline(now) || madeProgress

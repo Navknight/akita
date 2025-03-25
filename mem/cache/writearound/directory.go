@@ -1,6 +1,8 @@
 package writearound
 
 import (
+	"log"
+
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/pipelining"
@@ -97,6 +99,27 @@ func (d *directory) processMSHRHit(
 	trans *transaction,
 	mshrEntry *cache.MSHREntry,
 ) bool {
+	// Mark as demand request if it came from a higher level component
+	if len(trans.preCoalesceTransactions) > 0 {
+		trans.isDemandRequest = true
+
+		// Check if any transaction in this MSHR is a prefetch
+		for _, req := range mshrEntry.Requests {
+			if prefetchTrans, ok := req.(*transaction); ok && prefetchTrans.isPrefetch {
+				// We have a demand request hitting on a prefetch - record this as a prefetch hit
+				if d.cache.Prefetcher != nil {
+					// This assertion verifies the prefetch was for the right address
+					if prefetchTrans.read != nil && prefetchTrans.read.Address != trans.Address() {
+						log.Printf("Warning: Demand request for 0x%x hit MSHR with prefetch for 0x%x",
+							trans.Address(), prefetchTrans.read.Address)
+					}
+					d.cache.Prefetcher.RecordPrefetchHit()
+				}
+				break
+			}
+		}
+	}
+
 	mshrEntry.Requests = append(mshrEntry.Requests, trans)
 
 	if trans.read != nil {
@@ -106,7 +129,6 @@ func (d *directory) processMSHRHit(
 	}
 
 	d.buf.Pop()
-
 	return true
 }
 
@@ -125,6 +147,16 @@ func (d *directory) processReadHit(
 	}
 
 	if block.WasPrefetched && d.cache.Prefetcher != nil {
+		// Assert block is valid and has correct address
+		if !block.IsValid {
+			panic("Prefetched block marked as hit but not valid")
+		}
+		if block.Tag != (trans.Address()/uint64(1<<d.cache.log2BlockSize))*uint64(1<<d.cache.log2BlockSize) {
+			log.Printf("Warning: Prefetched block tag mismatch: expected 0x%x, got 0x%x",
+				(trans.Address()/uint64(1<<d.cache.log2BlockSize))*uint64(1<<d.cache.log2BlockSize),
+				block.Tag)
+		}
+
 		d.cache.Prefetcher.prefetchHits++
 		block.WasPrefetched = false
 	}
