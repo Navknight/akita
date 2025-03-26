@@ -176,7 +176,7 @@ func (s *bankStage) finalizeWriteFetchedTrans(
 	s.postPipelineBuf.Pop()
 
 	if block.WasPrefetched && s.cache.Prefetcher != nil {
-		s.cache.Prefetcher.completedPrefetcher++
+		s.cache.Prefetcher.RecordPrefetchComplete()
 	}
 
 	return true

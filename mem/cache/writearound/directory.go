@@ -147,17 +147,7 @@ func (d *directory) processReadHit(
 	}
 
 	if block.WasPrefetched && d.cache.Prefetcher != nil {
-		// Assert block is valid and has correct address
-		if !block.IsValid {
-			panic("Prefetched block marked as hit but not valid")
-		}
-		if block.Tag != (trans.Address()/uint64(1<<d.cache.log2BlockSize))*uint64(1<<d.cache.log2BlockSize) {
-			log.Printf("Warning: Prefetched block tag mismatch: expected 0x%x, got 0x%x",
-				(trans.Address()/uint64(1<<d.cache.log2BlockSize))*uint64(1<<d.cache.log2BlockSize),
-				block.Tag)
-		}
-
-		d.cache.Prefetcher.prefetchHits++
+		d.cache.Prefetcher.RecordPrefetchHit()
 		block.WasPrefetched = false
 	}
 
@@ -306,7 +296,7 @@ func (d *directory) processWriteHit(
 
 	if block.WasPrefetched && d.cache.Prefetcher != nil {
 		block.WasPrefetched = false
-		d.cache.Prefetcher.prefetchHits++
+		d.cache.Prefetcher.RecordPrefetchHit()
 	}
 
 	trans.bankAction = bankActionWrite
