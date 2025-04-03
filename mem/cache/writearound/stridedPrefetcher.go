@@ -62,16 +62,6 @@ func NewStridePrefetcher(cache *Cache, degree int) *StridePrefetcher {
 	return p
 }
 
-// Enable turns on the prefetcher
-func (p *StridePrefetcher) Enable() {
-	p.enabled = true
-}
-
-// Disable turns off the prefetcher
-func (p *StridePrefetcher) Disable() {
-	p.enabled = false
-}
-
 // RecordAccess should be called when a memory address is accessed
 func (p *StridePrefetcher) RecordAccess(pid vm.PID, addr uint64) {
 	if !p.enabled {
@@ -320,14 +310,14 @@ func (p *StridePrefetcher) GetPrefetchAccuracy() float64 {
 	if p.completedPrefetches == 0 {
 		return 0.0
 	}
-	return float64(p.prefetchHits) / float64(p.completedPrefetches) * 100.0
+	return (float64(p.prefetchHits) / float64(p.completedPrefetches)) * 100.0
 }
 
 // GetDetailedStats returns detailed prefetcher statistics for reporting
 func (p *StridePrefetcher) GetDetailedStats() map[string]interface{} {
 	inCache := int64(p.completedPrefetches) - int64(p.prefetchHits) - int64(p.prefetchMisses)
 	if inCache < 0 {
-		inCache = 0
+		panic("metrics are wrong")
 	}
 
 	return map[string]interface{}{
