@@ -107,13 +107,14 @@ func (d *directory) processMSHRHit(
 		for _, req := range mshrEntry.Requests {
 			if prefetchTrans, ok := req.(*transaction); ok && prefetchTrans.isPrefetch {
 				// We have a demand request hitting on a prefetch - record this as a prefetch hit
-				if d.cache.Prefetcher != nil {
+				if d.cache.Prefetcher != nil && prefetchTrans.block.WasPrefetched {
 					// This assertion verifies the prefetch was for the right address
 					if prefetchTrans.read != nil && prefetchTrans.read.Address != trans.Address() {
 						log.Printf("Warning: Demand request for 0x%x hit MSHR with prefetch for 0x%x",
 							trans.Address(), prefetchTrans.read.Address)
 					}
-					d.cache.Prefetcher.RecordPrefetchHit()
+					prefetchTrans.block.WasPrefetched = false
+					d.cache.Prefetcher.prefetchHits++
 				}
 				break
 			}
@@ -147,7 +148,7 @@ func (d *directory) processReadHit(
 	}
 
 	if block.WasPrefetched && d.cache.Prefetcher != nil {
-		d.cache.Prefetcher.RecordPrefetchHit()
+		d.cache.Prefetcher.prefetchHits++
 		block.WasPrefetched = false
 	}
 
@@ -214,9 +215,7 @@ func (d *directory) processWrite(
 		}
 		return false
 	}
-	if d.cache.Prefetcher != nil {
-		d.cache.Prefetcher.RecordAccess(pid, addr)
-	}
+
 	block := d.cache.directory.Lookup(pid, cacheLineID)
 	if block != nil && block.IsValid {
 		return d.processWriteHit(now, trans, block)
@@ -296,7 +295,7 @@ func (d *directory) processWriteHit(
 
 	if block.WasPrefetched && d.cache.Prefetcher != nil {
 		block.WasPrefetched = false
-		d.cache.Prefetcher.RecordPrefetchHit()
+		d.cache.Prefetcher.prefetchHits++
 	}
 
 	trans.bankAction = bankActionWrite

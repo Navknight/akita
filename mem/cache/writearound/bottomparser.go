@@ -162,11 +162,6 @@ func (p *bottomParser) finalizeMSHRTrans(
 		tracing.EndTask(trans.id, p.cache)
 	}
 
-	// If we had both prefetch and demand requests, record a prefetch hit
-	if len(demandRequests) > 0 && len(prefetchRequests) > 0 && p.cache.Prefetcher != nil {
-		p.cache.Prefetcher.RecordPrefetchHit()
-	}
-
 	// Process prefetch requests
 	for _, trans := range prefetchRequests {
 		// Mark prefetch as done so it can be cleaned up properly

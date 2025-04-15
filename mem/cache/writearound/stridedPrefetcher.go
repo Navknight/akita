@@ -270,11 +270,6 @@ func (p *StridePrefetcher) issuePrefetch(now sim.VTimeInSec, pid vm.PID, addr ui
 	return true
 }
 
-// RecordPrefetchHit should be called when a prefetched block is hit
-func (p *StridePrefetcher) RecordPrefetchHit() {
-	p.prefetchHits++
-}
-
 // RecordPrefetchComplete records when a prefetch completes
 func (p *StridePrefetcher) RecordPrefetchComplete() {
 	p.completedPrefetches++
