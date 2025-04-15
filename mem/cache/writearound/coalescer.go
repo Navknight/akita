@@ -5,7 +5,9 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -18,6 +20,10 @@ type coalescer struct {
 	traceFile   *os.File
 	traceWriter *log.Logger
 	traceMutex  sync.Mutex
+
+	traceBuffer   []string
+	lastFlushTime time.Time
+	flushInterval time.Duration
 }
 
 func (c *coalescer) Reset() {
@@ -28,6 +34,10 @@ func (c *coalescer) Tick(now sim.VTimeInSec) bool {
 	req := c.cache.topPort.Peek()
 	if req == nil {
 		return false
+	}
+
+	if c.traceWriter != nil && time.Since(c.lastFlushTime) > c.flushInterval {
+		c.flushTraceBuffer()
 	}
 
 	return c.processReq(now, req.(mem.AccessReq))
@@ -51,14 +61,20 @@ func (c *coalescer) EnableAddressTracing(filename string) error {
 		c.traceWriter.Println("Time, Address, Size, IsRead, Source")
 	}
 
+	c.traceBuffer = make([]string, 0, 1000)
+	c.lastFlushTime = time.Now()
+	c.flushInterval = 5 * time.Second
+
 	return nil
 }
 
 func (c *coalescer) DisableAddressTracing() {
 	if c.traceFile != nil {
+		c.flushTraceBuffer()
 		c.traceFile.Close()
 		c.traceFile = nil
 		c.traceWriter = nil
+		c.traceBuffer = nil
 	}
 }
 
@@ -66,9 +82,6 @@ func (c *coalescer) TraceAddress(now sim.VTimeInSec, req mem.AccessReq) {
 	if c.traceWriter == nil {
 		return
 	}
-
-	c.traceMutex.Lock()
-	defer c.traceMutex.Unlock()
 
 	isRead := 0
 	if _, ok := req.(*mem.ReadReq); ok {
@@ -80,13 +93,28 @@ func (c *coalescer) TraceAddress(now sim.VTimeInSec, req mem.AccessReq) {
 		sourceName = req.Meta().Src.Name()
 	}
 
-	c.traceWriter.Printf("%f,0x%x,%d,%d,%s\n",
+	c.traceBuffer = append(c.traceBuffer, fmt.Sprintf(
+		"%f,0x%x,%d,%d,%s\n",
 		float64(now),
 		req.GetAddress(),
 		req.GetByteSize(),
 		isRead,
 		sourceName,
-	)
+	))
+}
+
+func (c *coalescer) flushTraceBuffer() {
+	if len(c.traceBuffer) == 0 {
+		c.lastFlushTime = time.Now()
+		return
+	}
+	c.traceMutex.Lock()
+	defer c.traceMutex.Unlock()
+
+	c.traceWriter.Println(strings.Join(c.traceBuffer, "\n"))
+
+	c.traceBuffer = c.traceBuffer[:0]
+	c.lastFlushTime = time.Now()
 }
 
 func (c *coalescer) processReq(
