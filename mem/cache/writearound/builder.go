@@ -2,6 +2,9 @@ package writearound
 
 import (
 	"fmt"
+	"path"
+	"regexp"
+	"strings"
 
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
@@ -12,20 +15,21 @@ import (
 
 // A Builder can build an writearound cache
 type Builder struct {
-	engine                sim.Engine
-	freq                  sim.Freq
-	log2BlockSize         uint64
-	totalByteSize         uint64
-	wayAssociativity      int
-	numMSHREntry          int
-	numBank               int
-	dirLatency            int
-	bankLatency           int
-	numReqPerCycle        int
-	maxNumConcurrentTrans int
-	lowModuleFinder       mem.LowModuleFinder
-	visTracer             tracing.Tracer
-	prefetcherDegree      int
+	engine                 sim.Engine
+	freq                   sim.Freq
+	log2BlockSize          uint64
+	totalByteSize          uint64
+	wayAssociativity       int
+	numMSHREntry           int
+	numBank                int
+	dirLatency             int
+	bankLatency            int
+	numReqPerCycle         int
+	maxNumConcurrentTrans  int
+	lowModuleFinder        mem.LowModuleFinder
+	visTracer              tracing.Tracer
+	prefetcherDegree       int
+	addressTracingFilename string
 }
 
 // NewBuilder creates a builder with default parameter setting
@@ -135,6 +139,11 @@ func (b *Builder) WithLowModuleFinder(
 	return b
 }
 
+func (b *Builder) WithAddressTracingFilename(filename string) *Builder {
+	b.addressTracingFilename = filename
+	return b
+}
+
 // Build returns a new cache unit
 func (b *Builder) Build(name string) *Cache {
 	b.assertAllRequiredInformationIsAvailable()
@@ -149,6 +158,7 @@ func (b *Builder) Build(name string) *Cache {
 	if b.prefetcherDegree > 0 {
 		c.Prefetcher = NewStridePrefetcher(c, b.prefetcherDegree)
 	}
+
 	c.topPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle, name+".TopPort")
 	c.AddPort("Top", c.topPort)
 	c.bottomPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle,
@@ -184,7 +194,14 @@ func (b *Builder) Build(name string) *Cache {
 	if b.visTracer != nil {
 		tracing.CollectTrace(c, b.visTracer)
 	}
-
+	if b.addressTracingFilename != "" {
+		cacheName := regexp.MustCompile(`[^\w-]`).ReplaceAllString(strings.Join(strings.Split(name, "."), ""), "_") + ".csv"
+		file := path.Join(b.addressTracingFilename, cacheName)
+		err := c.EnableAddressTracing(file)
+		if err != nil {
+			panic(fmt.Sprintf("failed to enable addrs tracing", err))
+		}
+	}
 	return c
 }
 

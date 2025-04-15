@@ -1,8 +1,11 @@
 package writearound
 
 import (
+	"fmt"
 	"log"
+	"os"
 	"reflect"
+	"sync"
 
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -10,8 +13,11 @@ import (
 )
 
 type coalescer struct {
-	cache      *Cache
-	toCoalesce []*transaction
+	cache       *Cache
+	toCoalesce  []*transaction
+	traceFile   *os.File
+	traceWriter *log.Logger
+	traceMutex  sync.Mutex
 }
 
 func (c *coalescer) Reset() {
@@ -27,6 +33,62 @@ func (c *coalescer) Tick(now sim.VTimeInSec) bool {
 	return c.processReq(now, req.(mem.AccessReq))
 }
 
+func (c *coalescer) EnableAddressTracing(filename string) error {
+	var err error
+	c.traceFile, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Printf("Error opening file '%s': %v\n", filename, err)
+		return err
+	}
+
+	c.traceWriter = log.New(c.traceFile, "", 0)
+	fi, err := c.traceFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	if fi.Size() == 0 {
+		c.traceWriter.Println("Time, Address, Size, IsRead, Source")
+	}
+
+	return nil
+}
+
+func (c *coalescer) DisableAddressTracing() {
+	if c.traceFile != nil {
+		c.traceFile.Close()
+		c.traceFile = nil
+		c.traceWriter = nil
+	}
+}
+
+func (c *coalescer) TraceAddress(now sim.VTimeInSec, req mem.AccessReq) {
+	if c.traceWriter == nil {
+		return
+	}
+
+	c.traceMutex.Lock()
+	defer c.traceMutex.Unlock()
+
+	isRead := 0
+	if _, ok := req.(*mem.ReadReq); ok {
+		isRead = 1
+	}
+
+	sourceName := "unknown"
+	if req.Meta().Src != nil {
+		sourceName = req.Meta().Src.Name()
+	}
+
+	c.traceWriter.Printf("%f,0x%x,%d,%d,%s\n",
+		float64(now),
+		req.GetAddress(),
+		req.GetByteSize(),
+		isRead,
+		sourceName,
+	)
+}
+
 func (c *coalescer) processReq(
 	now sim.VTimeInSec,
 	req mem.AccessReq,
@@ -34,6 +96,8 @@ func (c *coalescer) processReq(
 	if len(c.cache.transactions) >= c.cache.maxNumConcurrentTrans {
 		return false
 	}
+
+	c.TraceAddress(now, req)
 
 	switch item := req.(type) {
 	case *mem.GL0InvalidateReq:

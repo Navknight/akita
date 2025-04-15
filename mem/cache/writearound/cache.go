@@ -43,6 +43,14 @@ type Cache struct {
 	isPaused bool
 }
 
+func (c *Cache) EnableAddressTracing(filename string) error {
+	return c.coalesceStage.EnableAddressTracing(filename)
+}
+
+func (c *Cache) DisableAddressTracing() {
+	c.coalesceStage.DisableAddressTracing()
+}
+
 // SetLowModuleFinder sets the finder that tells which remote port can serve
 // the data on a certain address.
 func (c *Cache) SetLowModuleFinder(lmf mem.LowModuleFinder) {
