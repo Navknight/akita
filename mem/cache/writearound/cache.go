@@ -40,6 +40,9 @@ type Cache struct {
 	transactions             []*transaction
 	postCoalesceTransactions []*transaction
 
+	magicMode   bool
+	dramStorage *mem.Storage
+
 	isPaused bool
 }
 

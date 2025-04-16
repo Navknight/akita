@@ -54,6 +54,10 @@ type MemController struct {
 	inflightTransactions []*signal.Transaction
 }
 
+func (c *MemController) GetStorage() *mem.Storage {
+	return c.storage
+}
+
 // Tick updates memory controller's internal state.
 func (c *MemController) Tick(now sim.VTimeInSec) (madeProgress bool) {
 	madeProgress = c.respond(now) || madeProgress

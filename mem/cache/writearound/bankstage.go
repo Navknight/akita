@@ -89,11 +89,27 @@ func (s *bankStage) finalizeReadHitTrans(
 ) bool {
 	block := trans.block
 
-	data, err := s.cache.storage.Read(
-		block.CacheAddress, trans.read.AccessByteSize)
-	if err != nil {
-		panic(err)
+	var data []byte
+	var err error
+
+	if s.cache.magicMode && block != nil {
+		data, err = s.cache.dramStorage.Read(
+			trans.read.Address,
+			trans.read.AccessByteSize,
+		)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		data, err = s.cache.storage.Read(
+			block.CacheAddress,
+			trans.read.AccessByteSize,
+		)
+		if err != nil {
+			panic(err)
+		}
 	}
+
 	block.ReadCount--
 
 	for _, t := range trans.preCoalesceTransactions {
@@ -117,22 +133,37 @@ func (s *bankStage) finalizeWriteTrans(
 	block := trans.block
 	blockSize := 1 << s.cache.log2BlockSize
 
-	data, err := s.cache.storage.Read(block.CacheAddress, uint64(blockSize))
-	if err != nil {
-		panic(err)
-	}
+	var err error
 
-	offset := write.Address - block.Tag
-	for i := 0; i < len(write.Data); i++ {
-		if write.DirtyMask[i] {
-			data[offset+uint64(i)] = write.Data[i]
+	fmt.Println("writing to bank")
+
+	if s.cache.magicMode {
+		err = s.cache.dramStorage.Write(
+			write.Address, write.Data,
+		)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+
+		data, err := s.cache.storage.Read(block.CacheAddress, uint64(blockSize))
+		if err != nil {
+			panic(err)
+		}
+
+		offset := write.Address - block.Tag
+		for i := 0; i < len(write.Data); i++ {
+			if write.DirtyMask[i] {
+				data[offset+uint64(i)] = write.Data[i]
+			}
+		}
+
+		err = s.cache.storage.Write(block.CacheAddress, data)
+		if err != nil {
+			panic(err)
 		}
 	}
 
-	err = s.cache.storage.Write(block.CacheAddress, data)
-	if err != nil {
-		panic(err)
-	}
 	block.DirtyMask = write.DirtyMask
 	block.IsLocked = false
 

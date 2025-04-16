@@ -74,6 +74,10 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 		d.cache.Prefetcher.RecordAccess(pid, addr)
 	}
 
+	if d.cache.magicMode {
+		return d.processMagicModeHit(now, trans, addr)
+	}
+
 	mshrEntry := d.cache.mshr.Query(pid, cacheLineID)
 	if mshrEntry != nil {
 		return d.processMSHRHit(now, trans, mshrEntry)
@@ -89,6 +93,59 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 	}
 
 	return d.processReadMiss(now, trans)
+}
+
+func (d *directory) processMagicModeHit(
+	now sim.VTimeInSec,
+	trans *transaction,
+	addr uint64,
+) bool {
+	blockSize := uint64(1 << d.cache.log2BlockSize)
+	cacheLineID := addr / blockSize * blockSize
+
+	block := d.findOrCreateMagicBlock(cacheLineID)
+
+	if block.IsLocked {
+		return false
+	}
+
+	bankBuf := d.getBankBuf(block)
+	if !bankBuf.CanPush() {
+		return false
+	}
+
+	trans.block = block
+	trans.bankAction = bankActionReadHit
+	block.ReadCount++
+
+	bankBuf.Push(trans)
+
+	d.buf.Pop()
+	tracing.AddTaskStep(trans.id, d.cache, "magic-hit")
+
+	return true
+}
+
+func (d *directory) findOrCreateMagicBlock(cacheLineID uint64) *cache.Block {
+	block := d.cache.directory.Lookup(0, cacheLineID)
+	numSets := len(d.cache.directory.GetSets())
+	setID := int(cacheLineID>>d.cache.log2BlockSize) % (numSets)
+
+	if block == nil || !block.IsValid {
+		block = &cache.Block{
+			PID:           0,
+			Tag:           cacheLineID,
+			IsValid:       true,
+			CacheAddress:  cacheLineID,
+			ReadCount:     0,
+			WasPrefetched: false,
+			SetID:         setID,
+			WayID:         0, //any way should be fine
+			DirtyMask:     make([]bool, 1<<d.cache.log2BlockSize),
+		}
+	}
+
+	return block
 }
 
 func (d *directory) processMSHRHit(
@@ -192,6 +249,10 @@ func (d *directory) processWrite(
 	blockSize := uint64(1 << d.cache.log2BlockSize)
 	cacheLineID := addr / blockSize * blockSize
 
+	if d.cache.magicMode {
+		return d.processMagicModeWrite(now, trans, addr)
+	}
+
 	mshrEntry := d.cache.mshr.Query(pid, cacheLineID)
 	if mshrEntry != nil {
 		ok := d.writeBottom(now, trans)
@@ -207,6 +268,36 @@ func (d *directory) processWrite(
 	}
 
 	return d.writeMiss(now, trans)
+}
+
+func (d *directory) processMagicModeWrite(
+	now sim.VTimeInSec,
+	trans *transaction,
+	addr uint64) bool {
+	blockSize := uint64(1 << d.cache.log2BlockSize)
+	cacheLineID := addr / blockSize * blockSize
+
+	block := d.findOrCreateMagicBlock(cacheLineID)
+
+	if block.IsLocked {
+		return false
+	}
+
+	bankBuf := d.getBankBuf(block)
+	if !bankBuf.CanPush() {
+		return false
+	}
+
+	trans.block = block
+	trans.bankAction = bankActionWrite
+	block.IsLocked = true
+
+	bankBuf.Push(trans)
+
+	d.buf.Pop()
+	tracing.AddTaskStep(trans.id, d.cache, "magic-write")
+
+	return true
 }
 
 func (d *directory) writeMiss(

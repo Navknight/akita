@@ -30,6 +30,15 @@ type Builder struct {
 	visTracer              tracing.Tracer
 	prefetcherDegree       int
 	addressTracingFilename string
+
+	magicMode   bool
+	dramStorage *mem.Storage
+}
+
+func (b *Builder) WithMagicMode(dramStorage *mem.Storage) *Builder {
+	b.dramStorage = dramStorage
+	b.magicMode = true
+	return b
 }
 
 // NewBuilder creates a builder with default parameter setting
@@ -157,6 +166,13 @@ func (b *Builder) Build(name string) *Cache {
 
 	if b.prefetcherDegree > 0 {
 		c.Prefetcher = NewStridePrefetcher(c, b.prefetcherDegree)
+	}
+
+	c.magicMode = b.magicMode
+	c.dramStorage = b.dramStorage
+
+	if !c.magicMode {
+		panic("magic mode not pen")
 	}
 
 	c.topPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle, name+".TopPort")
