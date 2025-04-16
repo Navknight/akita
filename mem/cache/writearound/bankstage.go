@@ -135,8 +135,6 @@ func (s *bankStage) finalizeWriteTrans(
 
 	var err error
 
-	fmt.Println("writing to bank")
-
 	if s.cache.magicMode {
 		err = s.cache.dramStorage.Write(
 			write.Address, write.Data,

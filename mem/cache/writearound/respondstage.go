@@ -1,6 +1,8 @@
 package writearound
 
 import (
+	"fmt"
+
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
 	"github.com/sarchlab/akita/v3/tracing"
@@ -62,6 +64,7 @@ func (s *respondStage) respondReadTrans(
 		Build()
 	err := s.cache.topPort.Send(dr)
 	if err != nil {
+		fmt.Println("response send error", err)
 		return false
 	}
 
@@ -89,6 +92,7 @@ func (s *respondStage) respondWriteTrans(
 		Build()
 	err := s.cache.topPort.Send(done)
 	if err != nil {
+		fmt.Println("response send write error", err)
 		return false
 	}
 

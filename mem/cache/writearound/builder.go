@@ -171,10 +171,6 @@ func (b *Builder) Build(name string) *Cache {
 	c.magicMode = b.magicMode
 	c.dramStorage = b.dramStorage
 
-	if !c.magicMode {
-		panic("magic mode not pen")
-	}
-
 	c.topPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle, name+".TopPort")
 	c.AddPort("Top", c.topPort)
 	c.bottomPort = sim.NewLimitNumMsgPort(c, b.numReqPerCycle,
