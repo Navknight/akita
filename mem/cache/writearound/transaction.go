@@ -31,8 +31,7 @@ type transaction struct {
 	data                  []byte
 	writeFetchedDirtyMask []bool
 
-	isDemandRequest bool
-	isPrefetch      bool
+	isPrefetch bool
 
 	fetchAndWrite bool
 	done          bool

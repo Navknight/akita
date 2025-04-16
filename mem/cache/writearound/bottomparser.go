@@ -1,8 +1,6 @@
 package writearound
 
 import (
-	"fmt"
-
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -117,56 +115,27 @@ func (p *bottomParser) finalizeMSHRTrans(
 	data []byte,
 	now sim.VTimeInSec,
 ) {
-	// Separate demand and prefetch requests for better control
-	demandRequests := []*transaction{}
-	prefetchRequests := []*transaction{}
-
 	for _, t := range mshrEntry.Requests {
 		trans := t.(*transaction)
 		if trans.isPrefetch {
-			prefetchRequests = append(prefetchRequests, trans)
+			trans.done = true
+			tracing.EndTask(trans.id, p.cache)
 		} else {
-			demandRequests = append(demandRequests, trans)
-		}
-	}
-
-	// Process demand requests first
-	for _, trans := range demandRequests {
-		if trans.read != nil {
-			// Verify the data length meets the block size requirement
-			expectedSize := uint64(1 << p.cache.log2BlockSize)
-			if uint64(len(data)) != expectedSize {
-				panic(fmt.Sprintf("Data length mismatch: expected %d bytes, got %d bytes",
-					expectedSize, len(data)))
-			}
-
-			for _, preCTrans := range trans.preCoalesceTransactions {
-				read := preCTrans.read
-				offset := read.Address - mshrEntry.Block.Tag
-
-				// Range check to catch offset calculation errors
-				if offset >= uint64(len(data)) || offset+read.AccessByteSize > uint64(len(data)) {
-					panic(fmt.Sprintf("Out of bounds access: offset=%d, size=%d, data_len=%d",
-						offset, read.AccessByteSize, len(data)))
+			if trans.read != nil {
+				for _, preCTrans := range trans.preCoalesceTransactions {
+					read := preCTrans.read
+					offset := read.Address - mshrEntry.Block.Tag
+					preCTrans.data = data[offset : offset+read.AccessByteSize]
+					preCTrans.done = true
 				}
-
-				preCTrans.data = data[offset : offset+read.AccessByteSize]
-				preCTrans.done = true
-			}
-		} else {
-			for _, preCTrans := range trans.preCoalesceTransactions {
-				preCTrans.done = true
+			} else {
+				for _, preCTrans := range trans.preCoalesceTransactions {
+					preCTrans.done = true
+				}
 			}
 		}
 		p.removeTransaction(trans)
-		tracing.EndTask(trans.id, p.cache)
-	}
 
-	// Process prefetch requests
-	for _, trans := range prefetchRequests {
-		// Mark prefetch as done so it can be cleaned up properly
-		trans.done = true
-		p.removeTransaction(trans)
 		tracing.EndTask(trans.id, p.cache)
 	}
 }

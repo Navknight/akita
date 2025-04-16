@@ -1,8 +1,6 @@
 package writearound
 
 import (
-	"log"
-
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/pipelining"
@@ -86,7 +84,6 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 		return d.processReadHit(now, trans, block)
 	}
 
-	// Try prefetching on read miss
 	if d.cache.Prefetcher != nil {
 		d.cache.Prefetcher.TryPrefetch(now, pid, addr)
 	}
@@ -99,25 +96,13 @@ func (d *directory) processMSHRHit(
 	trans *transaction,
 	mshrEntry *cache.MSHREntry,
 ) bool {
-	// Mark as demand request if it came from a higher level component
-	if len(trans.preCoalesceTransactions) > 0 {
-		trans.isDemandRequest = true
-
-		// Check if any transaction in this MSHR is a prefetch
-		for _, req := range mshrEntry.Requests {
-			if prefetchTrans, ok := req.(*transaction); ok && prefetchTrans.isPrefetch {
-				// We have a demand request hitting on a prefetch - record this as a prefetch hit
-				if d.cache.Prefetcher != nil && prefetchTrans.block.WasPrefetched {
-					// This assertion verifies the prefetch was for the right address
-					if prefetchTrans.read != nil && prefetchTrans.read.Address != trans.Address() {
-						log.Printf("Warning: Demand request for 0x%x hit MSHR with prefetch for 0x%x",
-							trans.Address(), prefetchTrans.read.Address)
-					}
-					prefetchTrans.block.WasPrefetched = false
-					d.cache.Prefetcher.prefetchHits++
-				}
-				break
+	for _, req := range mshrEntry.Requests {
+		if prefetchTrans, ok := req.(*transaction); ok && prefetchTrans.isPrefetch {
+			if d.cache.Prefetcher != nil && prefetchTrans.block.WasPrefetched {
+				prefetchTrans.block.WasPrefetched = false
+				d.cache.Prefetcher.prefetchHits++
 			}
+			break
 		}
 	}
 

@@ -270,11 +270,6 @@ func (p *StridePrefetcher) issuePrefetch(now sim.VTimeInSec, pid vm.PID, addr ui
 	return true
 }
 
-// RecordPrefetchComplete records when a prefetch completes
-func (p *StridePrefetcher) RecordPrefetchComplete() {
-	p.completedPrefetches++
-}
-
 // GetPrefetchHits returns the number of prefetch hits
 func (p *StridePrefetcher) GetPrefetchHits() uint64 {
 	return p.prefetchHits
