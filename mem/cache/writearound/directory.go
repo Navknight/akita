@@ -2,6 +2,7 @@ package writearound
 
 import (
 	"fmt"
+
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/pipelining"
@@ -82,11 +83,13 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 
 	mshrEntry := d.cache.mshr.Query(pid, cacheLineID)
 	if mshrEntry != nil {
+		mshrEntry.Block.AccessCount++
 		return d.processMSHRHit(now, trans, mshrEntry)
 	}
 
 	block := d.cache.directory.Lookup(pid, cacheLineID)
 	if block != nil && block.IsValid {
+		block.AccessCount++
 		return d.processReadHit(now, trans, block)
 	}
 
@@ -265,6 +268,7 @@ func (d *directory) processWrite(
 	if mshrEntry != nil {
 		ok := d.writeBottom(now, trans)
 		if ok {
+			mshrEntry.Block.AccessCount++
 			return d.processMSHRHit(now, trans, mshrEntry)
 		}
 		return false
@@ -272,6 +276,7 @@ func (d *directory) processWrite(
 
 	block := d.cache.directory.Lookup(pid, cacheLineID)
 	if block != nil && block.IsValid {
+		block.AccessCount++
 		return d.processWriteHit(now, trans, block)
 	}
 
@@ -397,6 +402,9 @@ func (d *directory) fetchFromBottom(
 	trans *transaction,
 	victim *cache.Block,
 ) bool {
+	d.cache.TotalEvictions++
+	d.cache.BlockAccessDistribution[victim.AccessCount]++
+	d.cache.CumulativeAccessCount += victim.AccessCount
 	addr := trans.Address()
 	pid := trans.PID()
 	blockSize := uint64(1 << d.cache.log2BlockSize)

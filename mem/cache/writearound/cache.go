@@ -1,6 +1,8 @@
 package writearound
 
 import (
+	"fmt"
+
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -43,7 +45,47 @@ type Cache struct {
 	magicMode   bool
 	dramStorage *mem.Storage
 
+	BlockAccessDistribution map[uint64]uint64
+	TotalEvictions          uint64
+	CumulativeAccessCount   uint64
+
 	isPaused bool
+}
+
+func (c *Cache) GetBlockAccessStats() map[string]interface{} {
+	histogram := make(map[string]int)
+
+	for i := uint64(0); i <= 10; i++ {
+		histogram[fmt.Sprintf("%d", i)] = int(c.BlockAccessDistribution[i])
+	}
+
+	for start := uint64(11); start <= 100; start += 10 {
+		end := start + 9
+		bucketName := fmt.Sprintf("%d-%d", start, end)
+		count := 0
+
+		for i := start; i <= end; i++ {
+			count += int(c.BlockAccessDistribution[i])
+		}
+
+		histogram[bucketName] = count
+	}
+
+	countOver100 := 0
+	for i := uint64(101); i < 1000; i++ {
+		if val, exists := c.BlockAccessDistribution[i]; exists {
+			countOver100 += int(val)
+		}
+	}
+
+	if countOver100 > 0 {
+		histogram["100+"] = countOver100
+	}
+
+	return map[string]interface{}{
+		"AccessHistogram": histogram,
+		"TotalEvictions":  c.TotalEvictions,
+	}
 }
 
 func (c *Cache) EnableAddressTracing(filename string) error {

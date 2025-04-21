@@ -201,6 +201,10 @@ func (b *Builder) Build(name string) *Cache {
 	c.lowModuleFinder = b.lowModuleFinder
 	c.maxNumConcurrentTrans = b.maxNumConcurrentTrans
 
+	c.BlockAccessDistribution = make(map[uint64]uint64)
+	c.TotalEvictions = 0
+	c.CumulativeAccessCount = 0
+
 	b.buildStages(c)
 
 	if b.visTracer != nil {
