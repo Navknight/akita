@@ -114,6 +114,9 @@ func (s *bankStage) finalizeReadHitTrans(
 
 	for _, t := range trans.preCoalesceTransactions {
 		offset := t.read.Address - block.Tag
+		if offset != 0 {
+			panic("offset not 0")
+		}
 		t.data = data[offset : offset+t.read.AccessByteSize]
 		t.done = true
 	}

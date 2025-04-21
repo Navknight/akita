@@ -1,6 +1,7 @@
 package writearound
 
 import (
+	"fmt"
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/pipelining"
@@ -18,6 +19,7 @@ func (i dirPipelineItem) TaskID() string {
 
 type directory struct {
 	cache *Cache
+	wayID int
 
 	pipeline pipelining.Pipeline
 	buf      sim.Buffer
@@ -130,19 +132,25 @@ func (d *directory) findOrCreateMagicBlock(cacheLineID uint64) *cache.Block {
 	block := d.cache.directory.Lookup(0, cacheLineID)
 	numSets := len(d.cache.directory.GetSets())
 	setID := int(cacheLineID>>d.cache.log2BlockSize) % (numSets)
+	d.wayID = (d.wayID + 1) % d.cache.directory.WayAssociativity()
+	fmt.Println("wayID: ", d.wayID)
 
 	if block == nil || !block.IsValid {
+		fmt.Println("creating block")
 		block = &cache.Block{
 			PID:           0,
 			Tag:           cacheLineID,
 			IsValid:       true,
-			CacheAddress:  cacheLineID,
+			CacheAddress:  uint64(setID*d.cache.wayAssociativity + (1 << d.cache.log2BlockSize)),
 			ReadCount:     0,
 			WasPrefetched: false,
 			SetID:         setID,
-			WayID:         0, //any way should be fine
+			WayID:         d.wayID, //any way should be fine
 			DirtyMask:     make([]bool, 1<<d.cache.log2BlockSize),
+			IsLocked:      false,
 		}
+	} else {
+		fmt.Println("returning existing block")
 	}
 
 	return block
