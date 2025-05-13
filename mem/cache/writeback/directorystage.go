@@ -210,8 +210,22 @@ func (ds *directoryStage) handleReadMiss(
 	var success bool
 	if ds.needEviction(victim) {
 		success = ds.evict(now, trans, victim)
+		if success {
+			tracing.AddTaskStep(
+				tracing.MsgIDAtReceiver(trans.read, ds.cache),
+				ds.cache,
+				"read-miss",
+			)
+		}
 	} else {
 		success = ds.fetch(now, trans, victim)
+		if success {
+			tracing.AddTaskStep(
+				tracing.MsgIDAtReceiver(trans.read, ds.cache),
+				ds.cache,
+				"read-miss",
+			)
+		}
 	}
 
 	// Try prefetching if the read miss was handled successfully

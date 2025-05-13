@@ -193,6 +193,7 @@ func (b *Builder) configureCache(cacheModule *Cache) {
 	blockSize := 1 << b.log2BlockSize
 	vimctimFinder := cache.NewLRUVictimFinder()
 	numSet := int(b.byteSize / uint64(b.wayAssociativity*blockSize))
+	fmt.Println("l2 numsets: ", numSet)
 	directory := cache.NewDirectory(
 		numSet, b.wayAssociativity, blockSize, vimctimFinder)
 
