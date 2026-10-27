@@ -14,6 +14,7 @@ type Builder struct {
 	migrationServiceProvider sim.Port
 	maxNumReqInFlight        int
 	pageWalkingLatency       int
+	policy                   MigrationPolicy
 }
 
 // MakeBuilder creates a new builder
@@ -23,6 +24,11 @@ func MakeBuilder() Builder {
 		log2PageSize:      12,
 		maxNumReqInFlight: 16,
 	}
+}
+
+func (b Builder) WithMigrationPolicy(p MigrationPolicy) Builder {
+	b.policy = p
+	return b
 }
 
 // WithEngine sets the engine to be used with the MMU
@@ -88,6 +94,7 @@ func (b Builder) configureInternalStates(mmu *MMU) {
 	mmu.migrationQueueSize = 4096
 	mmu.maxRequestsInFlight = b.maxNumReqInFlight
 	mmu.latency = b.pageWalkingLatency
+	mmu.policy = b.policy
 	mmu.PageAccessedByDeviceID = make(map[uint64][]uint64)
 }
 

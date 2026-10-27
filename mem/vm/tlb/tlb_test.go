@@ -41,7 +41,6 @@ var _ = Describe("TLB", func() {
 	})
 
 	It("should do nothing if there is no req in TopPort", func() {
-		topPort.EXPECT().Peek().Return(nil)
 
 		madeProgress := tlb.lookup(10)
 
@@ -75,8 +74,7 @@ var _ = Describe("TLB", func() {
 		})
 
 		It("should respond to top", func() {
-			topPort.EXPECT().Peek().Return(req)
-			topPort.EXPECT().Retrieve(gomock.Any())
+			tlb.pipeline = []pipelineItem{{req: req}}
 			topPort.EXPECT().Send(gomock.Any())
 
 			set.EXPECT().Visit(wayID)
@@ -87,7 +85,7 @@ var _ = Describe("TLB", func() {
 		})
 
 		It("should stall if cannot send to top", func() {
-			topPort.EXPECT().Peek().Return(req)
+			tlb.pipeline = []pipelineItem{{req: req}}
 			topPort.EXPECT().Send(gomock.Any()).
 				Return(&sim.SendError{})
 
@@ -126,8 +124,7 @@ var _ = Describe("TLB", func() {
 		})
 
 		It("should fetch from bottom and add entry to MSHR", func() {
-			topPort.EXPECT().Peek().Return(req)
-			topPort.EXPECT().Retrieve(gomock.Any())
+			tlb.pipeline = []pipelineItem{{req: req}}
 			bottomPort.EXPECT().Send(gomock.Any()).
 				Do(func(req *vm.TranslationReq) {
 					Expect(req.VAddr).To(Equal(uint64(0x100)))
@@ -144,8 +141,7 @@ var _ = Describe("TLB", func() {
 
 		It("should find the entry in MSHR and not request from bottom", func() {
 			tlb.mshr.Add(1, 0x100)
-			topPort.EXPECT().Peek().Return(req)
-			topPort.EXPECT().Retrieve(gomock.Any())
+			tlb.pipeline = []pipelineItem{{req: req}}
 
 			madeProgress := tlb.lookup(10)
 			Expect(tlb.mshr.IsEntryPresent(vm.PID(1), uint64(0x100))).
@@ -154,7 +150,7 @@ var _ = Describe("TLB", func() {
 		})
 
 		It("should stall if bottom is busy", func() {
-			topPort.EXPECT().Peek().Return(req)
+			tlb.pipeline = []pipelineItem{{req: req}}
 			bottomPort.EXPECT().Send(gomock.Any()).
 				Return(&sim.SendError{})
 

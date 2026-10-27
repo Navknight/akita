@@ -345,8 +345,6 @@ var _ = Describe("MMU", func() {
 			updatedPage := page
 			updatedPage.IsMigrating = false
 			pageTable.EXPECT().Update(updatedPage)
-
-			updatedPage.IsPinned = true
 			pageTable.EXPECT().Update(updatedPage)
 
 			madeProgress := mmu.processMigrationReturn(10)

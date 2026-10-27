@@ -7,6 +7,7 @@ type Builder struct {
 	engine         sim.Engine
 	freq           sim.Freq
 	numReqPerCycle int
+	latency        int
 	numSets        int
 	numWays        int
 	pageSize       uint64
@@ -79,6 +80,11 @@ func (b Builder) WithNumMSHREntry(num int) Builder {
 }
 
 // Build creates a new TLB
+func (b Builder) WithLatency(cycles int) Builder {
+	b.latency = cycles
+	return b
+}
+
 func (b Builder) Build(name string) *TLB {
 	tlb := &TLB{}
 	tlb.TickingComponent =
@@ -87,6 +93,7 @@ func (b Builder) Build(name string) *TLB {
 	tlb.numSets = b.numSets
 	tlb.numWays = b.numWays
 	tlb.numReqPerCycle = b.numReqPerCycle
+	tlb.latency = b.latency
 	tlb.pageSize = b.pageSize
 	tlb.LowModule = b.lowModule
 	tlb.mshr = newMSHR(b.numMSHREntry)

@@ -4,11 +4,17 @@ import (
 	"log"
 	"reflect"
 
+	"github.com/sarchlab/akita/v3/mem/blockstats"
 	"github.com/sarchlab/akita/v3/mem/vm"
 	"github.com/sarchlab/akita/v3/mem/vm/tlb/internal"
 	"github.com/sarchlab/akita/v3/sim"
 	"github.com/sarchlab/akita/v3/tracing"
 )
+
+type pipelineItem struct {
+	req       *vm.TranslationReq
+	cycleLeft int
+}
 
 // A TLB is a cache that maintains some page information.
 type TLB struct {
@@ -24,6 +30,8 @@ type TLB struct {
 	numWays        int
 	pageSize       uint64
 	numReqPerCycle int
+	latency        int
+	pipeline       []pipelineItem
 
 	Sets []internal.Set
 
@@ -31,6 +39,17 @@ type TLB struct {
 	respondingMSHREntry *mshrEntry
 
 	isPaused bool
+
+	stats      *blockstats.Stats
+	entryStats [][]blockstats.Entry
+}
+
+func (tlb *TLB) SetBlockStats(s *blockstats.Stats) {
+	tlb.stats = s
+	tlb.entryStats = make([][]blockstats.Entry, tlb.numSets)
+	for i := range tlb.entryStats {
+		tlb.entryStats[i] = make([]blockstats.Entry, tlb.numWays)
+	}
 }
 
 // Reset sets all the entries int he TLB to be invalid
@@ -51,6 +70,12 @@ func (tlb *TLB) Tick(now sim.VTimeInSec) bool {
 	if !tlb.isPaused {
 		for i := 0; i < tlb.numReqPerCycle; i++ {
 			madeProgress = tlb.respondMSHREntry(now) || madeProgress
+		}
+
+		madeProgress = tlb.countDown() || madeProgress
+
+		for i := 0; i < tlb.numReqPerCycle; i++ {
+			madeProgress = tlb.admit(now) || madeProgress
 		}
 
 		for i := 0; i < tlb.numReqPerCycle; i++ {
@@ -94,13 +119,41 @@ func (tlb *TLB) respondMSHREntry(now sim.VTimeInSec) bool {
 	return true
 }
 
-func (tlb *TLB) lookup(now sim.VTimeInSec) bool {
-	msg := tlb.topPort.Peek()
+func (tlb *TLB) countDown() bool {
+	madeProgress := false
+	for i := range tlb.pipeline {
+		if tlb.pipeline[i].cycleLeft > 0 {
+			tlb.pipeline[i].cycleLeft--
+			madeProgress = true
+		}
+	}
+	return madeProgress
+}
+
+func (tlb *TLB) admit(now sim.VTimeInSec) bool {
+	if len(tlb.pipeline) >= tlb.numReqPerCycle*(tlb.latency+1) {
+		return false
+	}
+
+	msg := tlb.topPort.Retrieve(now)
 	if msg == nil {
 		return false
 	}
 
-	req := msg.(*vm.TranslationReq)
+	tlb.pipeline = append(tlb.pipeline, pipelineItem{
+		req:       msg.(*vm.TranslationReq),
+		cycleLeft: tlb.latency,
+	})
+
+	return true
+}
+
+func (tlb *TLB) lookup(now sim.VTimeInSec) bool {
+	if len(tlb.pipeline) == 0 || tlb.pipeline[0].cycleLeft > 0 {
+		return false
+	}
+
+	req := tlb.pipeline[0].req
 
 	mshrEntry := tlb.mshr.Query(req.PID, req.VAddr)
 	if mshrEntry != nil {
@@ -129,7 +182,10 @@ func (tlb *TLB) handleTranslationHit(
 	}
 
 	tlb.visit(setID, wayID)
-	tlb.topPort.Retrieve(now)
+	if tlb.stats != nil {
+		tlb.stats.Hit(&tlb.entryStats[setID][wayID])
+	}
+	tlb.pipeline = tlb.pipeline[1:]
 
 	tracing.TraceReqReceive(req, tlb)
 	tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "hit")
@@ -148,7 +204,7 @@ func (tlb *TLB) handleTranslationMiss(
 
 	fetched := tlb.fetchBottom(now, req)
 	if fetched {
-		tlb.topPort.Retrieve(now)
+		tlb.pipeline = tlb.pipeline[1:]
 		tracing.TraceReqReceive(req, tlb)
 		tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "miss")
 		return true
@@ -186,7 +242,7 @@ func (tlb *TLB) processTLBMSHRHit(
 ) bool {
 	mshrEntry.Requests = append(mshrEntry.Requests, req)
 
-	tlb.topPort.Retrieve(now)
+	tlb.pipeline = tlb.pipeline[1:]
 	tracing.TraceReqReceive(req, tlb)
 	tracing.AddTaskStep(tracing.MsgIDAtReceiver(req, tlb), tlb, "mshr-hit")
 
@@ -244,6 +300,10 @@ func (tlb *TLB) parseBottom(now sim.VTimeInSec) bool {
 	}
 	set.Update(wayID, page)
 	set.Visit(wayID)
+	if tlb.stats != nil {
+		tlb.stats.Fill(&tlb.entryStats[setID][wayID],
+			page.VAddr, uint64(page.PID))
+	}
 
 	mshrEntry := tlb.mshr.GetEntry(rsp.Page.PID, rsp.Page.VAddr)
 	tlb.respondingMSHREntry = mshrEntry
@@ -303,6 +363,9 @@ func (tlb *TLB) handleTLBFlush(now sim.VTimeInSec, req *FlushReq) bool {
 
 		page.Valid = false
 		set.Update(wayID, page)
+		if tlb.stats != nil {
+			tlb.stats.Flush(&tlb.entryStats[setID][wayID])
+		}
 	}
 
 	tlb.mshr.Reset()
@@ -323,6 +386,7 @@ func (tlb *TLB) handleTLBRestart(now sim.VTimeInSec, req *RestartReq) bool {
 	}
 
 	tlb.isPaused = false
+	tlb.pipeline = nil
 
 	for tlb.topPort.Retrieve(now) != nil {
 		tlb.topPort.Retrieve(now)

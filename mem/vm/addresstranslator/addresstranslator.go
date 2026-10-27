@@ -41,6 +41,8 @@ type AddressTranslator struct {
 
 	isFlushing bool
 
+	accessCounter *vm.AccessCounter
+
 	transactions        []*transaction
 	inflightReqToBottom []reqToBottom
 
@@ -55,6 +57,10 @@ func (t *AddressTranslator) SetTranslationProvider(p sim.Port) {
 }
 
 // SetLowModuleFinder sets the table recording where to find an address.
+func (t *AddressTranslator) SetAccessCounter(c *vm.AccessCounter) {
+	t.accessCounter = c
+}
+
 func (t *AddressTranslator) SetLowModuleFinder(lmf mem.LowModuleFinder) {
 	t.lowModuleFinder = lmf
 }
@@ -204,6 +210,11 @@ func (t *AddressTranslator) parseTranslation(now sim.VTimeInSec) bool {
 	err := t.bottomPort.Send(translatedReq)
 	if err != nil {
 		return false
+	}
+
+	page := transaction.translationRsp.Page
+	if t.accessCounter != nil && page.DeviceID != t.deviceID {
+		t.accessCounter.Count(now, page.PID, page.VAddr, t.deviceID)
 	}
 
 	t.inflightReqToBottom = append(t.inflightReqToBottom,

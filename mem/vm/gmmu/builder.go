@@ -18,6 +18,9 @@ type Builder struct {
 	pageWalkingLatency int
 	deviceID           uint64
 	lowModule          sim.Port
+	numLevels          int
+	pwcSize            int
+	walkQueueSize      int
 }
 
 // MakeBuilder creates a new builder
@@ -26,6 +29,9 @@ func MakeBuilder() Builder {
 		freq:              1 * sim.GHz,
 		log2PageSize:      12,
 		maxNumReqInFlight: 16,
+		numLevels:         4,
+		pwcSize:           128,
+		walkQueueSize:     4096,
 	}
 }
 
@@ -72,6 +78,21 @@ func (b Builder) WithDeviceID(deviceID uint64) Builder {
 	return b
 }
 
+func (b Builder) WithNumLevels(n int) Builder {
+	b.numLevels = n
+	return b
+}
+
+func (b Builder) WithPWCSize(n int) Builder {
+	b.pwcSize = n
+	return b
+}
+
+func (b Builder) WithWalkQueueSize(n int) Builder {
+	b.walkQueueSize = n
+	return b
+}
+
 // WithLowModule sets the low module of the GMMU
 func (b Builder) WithLowModule(p sim.Port) Builder {
 	b.lowModule = p
@@ -81,6 +102,8 @@ func (b Builder) WithLowModule(p sim.Port) Builder {
 func (b Builder) configureInternalStates(gmmu *Comp) {
 	gmmu.maxRequestsInFlight = b.maxNumReqInFlight
 	gmmu.latency = b.pageWalkingLatency
+	gmmu.log2PageSize = b.log2PageSize
+	gmmu.PWC = newPWC(b.pwcSize, b.numLevels)
 	gmmu.PageAccessedByDeviceID = make(map[uint64][]uint64)
 	gmmu.deviceID = b.deviceID
 	gmmu.LowModule = b.lowModule
@@ -95,7 +118,7 @@ func (b Builder) createPageTable(gmmu *Comp) {
 }
 
 func (b Builder) createPorts(name string, gmmu *Comp) {
-	gmmu.topPort = sim.NewLimitNumMsgPort(gmmu, 4096, name+".ToTop")
+	gmmu.topPort = sim.NewLimitNumMsgPort(gmmu, b.walkQueueSize, name+".ToTop")
 	gmmu.AddPort("Top", gmmu.topPort)
 	gmmu.bottomPort = sim.NewLimitNumMsgPort(gmmu, 4096, name+".BottomPort")
 	gmmu.AddPort("Bottom", gmmu.bottomPort)

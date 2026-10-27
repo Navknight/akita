@@ -13,9 +13,10 @@ import (
 )
 
 type transaction struct {
-	req       *vm.TranslationReq
-	page      vm.Page
-	cycleLeft int
+	req          *vm.TranslationReq
+	invalidation *vm.PTEInvalidationReq
+	page         vm.Page
+	cycleLeft    int
 }
 
 // Comp is the default gmmu implementation. It is also an akita Component.
@@ -32,14 +33,19 @@ type Comp struct {
 	bottomSender sim.BufferedSender
 
 	pageTable           vm.PageTable
+	log2PageSize        uint64
 	latency             int
 	maxRequestsInFlight int
+	PWC                 *pwc
+	AccessCounter       *vm.AccessCounter
 
 	walkingTranslations []transaction
 	remoteMemReqs       map[uint64]transaction
 
 	toRemoveFromPTW        []int
 	PageAccessedByDeviceID map[uint64][]uint64
+
+	NumInvalidationWalks uint64
 }
 
 // Tick defines how the gmmu update state each cycle
@@ -50,8 +56,34 @@ func (gmmu *Comp) Tick(now sim.VTimeInSec) bool {
 	madeProgress = gmmu.parseFromTop(now) || madeProgress
 	madeProgress = gmmu.walkPageTable(now) || madeProgress
 	madeProgress = gmmu.fetchFromBottom(now) || madeProgress
+	madeProgress = gmmu.sendAccessCounterNotification(now) || madeProgress
 
 	return madeProgress
+}
+
+func (gmmu *Comp) SetAccessCounter(c *vm.AccessCounter) {
+	gmmu.AccessCounter = c
+	c.OnPending = gmmu.TickLater
+}
+
+func (gmmu *Comp) sendAccessCounterNotification(now sim.VTimeInSec) bool {
+	if gmmu.AccessCounter == nil || len(gmmu.AccessCounter.Pending) == 0 {
+		return false
+	}
+
+	n := gmmu.AccessCounter.Pending[0]
+	n.ID = sim.GetIDGenerator().Generate()
+	n.Src = gmmu.bottomPort
+	n.Dst = gmmu.LowModule
+	n.SendTime = now
+
+	if err := gmmu.bottomPort.Send(n); err != nil {
+		return false
+	}
+
+	gmmu.AccessCounter.Pending = gmmu.AccessCounter.Pending[1:]
+
+	return true
 }
 
 func (gmmu *Comp) parseFromTop(now sim.VTimeInSec) bool {
@@ -81,9 +113,11 @@ func (gmmu *Comp) parseFromTop(now sim.VTimeInSec) bool {
 }
 
 func (gmmu *Comp) startWalking(req *vm.TranslationReq) {
+	cached := gmmu.PWC.lookup(req.PID, req.VAddr>>gmmu.log2PageSize)
+
 	translationInPipeline := transaction{
 		req:       req,
-		cycleLeft: gmmu.latency,
+		cycleLeft: (gmmu.PWC.numLevels - cached) * gmmu.latency,
 	}
 
 	gmmu.walkingTranslations = append(gmmu.walkingTranslations, translationInPipeline)
@@ -97,11 +131,18 @@ func (gmmu *Comp) walkPageTable(now sim.VTimeInSec) bool {
 			madeProgress = true
 			continue
 		}
+
+		if gmmu.walkingTranslations[i].invalidation != nil {
+			madeProgress = gmmu.finishInvalidationWalk(now, i) || madeProgress
+			continue
+		}
+
 		req := gmmu.walkingTranslations[i].req
+		gmmu.PWC.insert(req.PID, req.VAddr>>gmmu.log2PageSize)
 
 		page, _ := gmmu.pageTable.Find(req.PID, req.VAddr)
 
-		if page.DeviceID == gmmu.deviceID {
+		if page.DeviceID == gmmu.deviceID && !page.IsMigrating {
 			madeProgress = gmmu.finalizePageWalk(now, i) || madeProgress
 		} else {
 			madeProgress = gmmu.processRemoteMemReq(now, i) || madeProgress
@@ -127,8 +168,6 @@ func (gmmu *Comp) processRemoteMemReq(now sim.VTimeInSec, walkingIndex int) bool
 
 	walking := gmmu.walkingTranslations[walkingIndex].req
 
-	gmmu.remoteMemReqs[walking.VAddr] = gmmu.walkingTranslations[walkingIndex]
-
 	req := vm.TranslationReqBuilder{}.
 		WithSendTime(now).
 		WithSrc(gmmu.bottomPort).
@@ -143,6 +182,7 @@ func (gmmu *Comp) processRemoteMemReq(now sim.VTimeInSec, walkingIndex int) bool
 	if err != nil {
 		return false
 	}
+	gmmu.remoteMemReqs[walking.VAddr] = gmmu.walkingTranslations[walkingIndex]
 
 	gmmu.toRemoveFromPTW = append(gmmu.toRemoveFromPTW, walkingIndex)
 
@@ -197,35 +237,71 @@ func (gmmu *Comp) toRemove(index int) bool {
 }
 
 func (gmmu *Comp) fetchFromBottom(now sim.VTimeInSec) bool {
-	if !gmmu.topSender.CanSend(1) {
+	msg := gmmu.bottomPort.Peek()
+	if msg == nil {
 		return false
 	}
 
-	req := gmmu.bottomPort.Retrieve(now)
-	if req == nil {
-		return false
-	}
-
-	tracing.TraceReqReceive(req, gmmu)
-
-	switch req := req.(type) {
+	switch msg := msg.(type) {
 	case *vm.TranslationRsp:
-		return gmmu.handleTranslationRsp(now, req)
+		if !gmmu.topSender.CanSend(1) {
+			return false
+		}
+
+		gmmu.bottomPort.Retrieve(now)
+		tracing.TraceReqReceive(msg, gmmu)
+
+		return gmmu.handleTranslationRsp(now, msg)
+	case *vm.PTEInvalidationReq:
+		if len(gmmu.walkingTranslations) >= gmmu.maxRequestsInFlight {
+			return false
+		}
+
+		gmmu.bottomPort.Retrieve(now)
+		gmmu.startInvalidationWalk(msg)
+
+		return true
 	default:
-		log.Panicf("gmmu canot handle request of type %s", reflect.TypeOf(req))
+		log.Panicf("gmmu canot handle request of type %s", reflect.TypeOf(msg))
 	}
 
 	return true
 }
 
-func (gmmu *Comp) handleTranslationRsp(now sim.VTimeInSec, rsponse *vm.TranslationRsp) bool {
-	reqTransaction := gmmu.remoteMemReqs[rsponse.Page.VAddr]
+func (gmmu *Comp) startInvalidationWalk(inv *vm.PTEInvalidationReq) {
+	cached := gmmu.PWC.lookup(inv.PID, inv.VAddr>>gmmu.log2PageSize)
 
+	gmmu.walkingTranslations = append(gmmu.walkingTranslations, transaction{
+		invalidation: inv,
+		cycleLeft:    (gmmu.PWC.numLevels - cached) * gmmu.latency,
+	})
+}
+
+func (gmmu *Comp) finishInvalidationWalk(now sim.VTimeInSec, i int) bool {
+	inv := gmmu.walkingTranslations[i].invalidation
+	gmmu.PWC.insert(inv.PID, inv.VAddr>>gmmu.log2PageSize)
+
+	rsp := vm.NewPTEInvalidationRsp(now, gmmu.bottomPort, inv.Src, inv.ID)
+	if err := gmmu.bottomPort.Send(rsp); err != nil {
+		return false
+	}
+
+	gmmu.NumInvalidationWalks++
+	gmmu.toRemoveFromPTW = append(gmmu.toRemoveFromPTW, i)
+
+	return true
+}
+
+func (gmmu *Comp) handleTranslationRsp(now sim.VTimeInSec, rsponse *vm.TranslationRsp) bool {
+	t, ok := gmmu.remoteMemReqs[rsponse.Page.VAddr]
+	if !ok {
+		return true
+	}
 	rsp := vm.TranslationRspBuilder{}.
 		WithSendTime(now).
 		WithSrc(gmmu.topPort).
-		WithDst(reqTransaction.req.Src).
-		WithRspTo(rsponse.ID).
+		WithDst(t.req.Src).
+		WithRspTo(t.req.ID).
 		WithPage(rsponse.Page).
 		Build()
 

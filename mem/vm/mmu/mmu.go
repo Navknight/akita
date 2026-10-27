@@ -9,11 +9,21 @@ import (
 	"github.com/sarchlab/akita/v3/tracing"
 )
 
+type MigrationPolicy int
+
+const (
+	OnTouch MigrationPolicy = iota
+	AccessCounter
+	NoMigration
+	FirstTouch
+)
+
 type transaction struct {
 	req       *vm.TranslationReq
 	page      vm.Page
 	cycleLeft int
 	migration *vm.PageMigrationReqToDriver
+	noReply   bool
 }
 
 // MMU is the default mmu implementation. It is also an akita Component.
@@ -30,6 +40,7 @@ type MMU struct {
 	pageTable           vm.PageTable
 	latency             int
 	maxRequestsInFlight int
+	policy              MigrationPolicy
 
 	walkingTranslations      []transaction
 	migrationQueue           []transaction
@@ -131,7 +142,7 @@ func (mmu *MMU) pageNeedMigrate(walking transaction) bool {
 		return false
 	}
 
-	return true
+	return mmu.policy == OnTouch || mmu.policy == FirstTouch
 }
 
 func (mmu *MMU) doPageWalkHit(
@@ -174,16 +185,18 @@ func (mmu *MMU) sendMigrationToDriver(
 	}
 	trans.page = page
 
+	if mmu.isDoingMigration {
+		return false
+	}
+
 	if req.DeviceID == page.DeviceID || page.IsPinned {
-		mmu.sendTranlationRsp(now, trans)
+		if !trans.noReply {
+			mmu.sendTranlationRsp(now, trans)
+		}
 		mmu.migrationQueue = mmu.migrationQueue[1:]
 		mmu.markPageAsNotMigratingIfNotInTheMigrationQueue(page)
 
 		return true
-	}
-
-	if mmu.isDoingMigration {
-		return false
 	}
 
 	migrationInfo := new(vm.PageMigrationInfo)
@@ -274,19 +287,23 @@ func (mmu *MMU) processMigrationReturn(now sim.VTimeInSec) bool {
 		panic("page not found")
 	}
 
-	rsp := vm.TranslationRspBuilder{}.
-		WithSendTime(now).
-		WithSrc(mmu.topPort).
-		WithDst(req.Src).
-		WithRspTo(req.ID).
-		WithPage(page).
-		Build()
-	mmu.topSender.Send(rsp)
+	if !mmu.currentOnDemandMigration.noReply {
+		rsp := vm.TranslationRspBuilder{}.
+			WithSendTime(now).
+			WithSrc(mmu.topPort).
+			WithDst(req.Src).
+			WithRspTo(req.ID).
+			WithPage(page).
+			Build()
+		mmu.topSender.Send(rsp)
+	}
 
 	mmu.isDoingMigration = false
 
 	page = mmu.markPageAsNotMigratingIfNotInTheMigrationQueue(page)
-	page.IsPinned = true
+	if mmu.policy == FirstTouch {
+		page.IsPinned = true
+	}
 	mmu.pageTable.Update(page)
 
 	mmu.migrationPort.Retrieve(now)
@@ -309,11 +326,40 @@ func (mmu *MMU) parseFromTop(now sim.VTimeInSec) bool {
 	switch req := req.(type) {
 	case *vm.TranslationReq:
 		mmu.startWalking(req)
+	case *vm.AccessCounterNotification:
+		mmu.handleAccessCounterNotification(req)
 	default:
 		log.Panicf("MMU canot handle request of type %s", reflect.TypeOf(req))
 	}
 
 	return true
+}
+
+func (mmu *MMU) handleAccessCounterNotification(
+	n *vm.AccessCounterNotification,
+) {
+	if mmu.policy != AccessCounter ||
+		len(mmu.migrationQueue) >= mmu.migrationQueueSize {
+		return
+	}
+
+	page, found := mmu.pageTable.Find(n.PID, n.VAddr)
+	if !found || page.DeviceID == n.DeviceID ||
+		page.IsMigrating || page.IsPinned {
+		return
+	}
+
+	req := vm.TranslationReqBuilder{}.
+		WithPID(n.PID).
+		WithVAddr(n.VAddr).
+		WithDeviceID(n.DeviceID).
+		Build()
+
+	page.IsMigrating = true
+	mmu.pageTable.Update(page)
+
+	mmu.migrationQueue = append(mmu.migrationQueue,
+		transaction{req: req, page: page, noReply: true})
 }
 
 func (mmu *MMU) startWalking(req *vm.TranslationReq) {
