@@ -1,6 +1,7 @@
 package writethrough
 
 import (
+	"github.com/sarchlab/akita/v3/mem/blockstats"
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -105,4 +106,10 @@ func (c *Cache) tickCoalesceState(now sim.VTimeInSec) bool {
 		madeProgress = c.coalesceStage.Tick(now) || madeProgress
 	}
 	return madeProgress
+}
+
+func (c *Cache) SetBlockStats(s *blockstats.Stats) {
+	if d, ok := c.directory.(*cache.DirectoryImpl); ok {
+		d.SetBlockStats(s)
+	}
 }

@@ -74,9 +74,11 @@ func (d *directory) processRead(now sim.VTimeInSec, trans *transaction) bool {
 		return d.processMSHRHit(now, trans, mshrEntry)
 	}
 
-	block := d.cache.directory.Lookup(pid, cacheLineID)
-	if block != nil && block.IsValid {
-		return d.processReadHit(now, trans, block)
+	if !d.cache.isUncacheable(cacheLineID) {
+		block := d.cache.directory.Lookup(pid, cacheLineID)
+		if block != nil && block.IsValid {
+			return d.processReadHit(now, trans, block)
+		}
 	}
 
 	return d.processReadMiss(now, trans)

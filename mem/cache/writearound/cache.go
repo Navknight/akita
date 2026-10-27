@@ -1,6 +1,7 @@
 package writearound
 
 import (
+	"github.com/sarchlab/akita/v3/mem/blockstats"
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -22,6 +23,7 @@ type Cache struct {
 	bankLatency      int
 	wayAssociativity int
 	lowModuleFinder  mem.LowModuleFinder
+	uncacheable      func(addr uint64) bool
 
 	dirBuf   sim.Buffer
 	bankBufs []sim.Buffer
@@ -44,6 +46,14 @@ type Cache struct {
 // the data on a certain address.
 func (c *Cache) SetLowModuleFinder(lmf mem.LowModuleFinder) {
 	c.lowModuleFinder = lmf
+}
+
+func (c *Cache) SetUncacheable(f func(addr uint64) bool) {
+	c.uncacheable = f
+}
+
+func (c *Cache) isUncacheable(addr uint64) bool {
+	return c.uncacheable != nil && c.uncacheable(addr)
 }
 
 // Tick update the state of the cache
@@ -105,4 +115,10 @@ func (c *Cache) tickCoalesceState(now sim.VTimeInSec) bool {
 		madeProgress = c.coalesceStage.Tick(now) || madeProgress
 	}
 	return madeProgress
+}
+
+func (c *Cache) SetBlockStats(s *blockstats.Stats) {
+	if d, ok := c.directory.(*cache.DirectoryImpl); ok {
+		d.SetBlockStats(s)
+	}
 }

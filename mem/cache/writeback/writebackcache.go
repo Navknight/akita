@@ -1,6 +1,7 @@
 package writeback
 
 import (
+	"github.com/sarchlab/akita/v3/mem/blockstats"
 	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/sim"
@@ -51,6 +52,35 @@ type Cache struct {
 	state                cacheState
 	inFlightTransactions []*transaction
 	evictingList         map[uint64]bool
+	evictionsInFlight    []*transaction
+}
+
+func (c *Cache) dropEvictionInFlight(trans *transaction) {
+	for i, t := range c.evictionsInFlight {
+		if t == trans {
+			c.evictionsInFlight = append(c.evictionsInFlight[:i],
+				c.evictionsInFlight[i+1:]...)
+			return
+		}
+	}
+}
+
+func (c *Cache) salvageEvictions() []*transaction {
+	salvaged := c.evictionsInFlight
+	for _, t := range salvaged {
+		if t.evictingData == nil {
+			data, err := c.storage.Read(
+				t.victim.CacheAddress, 1<<c.log2BlockSize)
+			if err != nil {
+				panic(err)
+			}
+			t.evictingData = data
+		}
+		t.action = writeBufferFlush
+	}
+	c.evictionsInFlight = nil
+
+	return salvaged
 }
 
 // SetLowModuleFinder sets the LowModuleFinder used by the cache.
@@ -100,6 +130,8 @@ func (c *Cache) runStage(now sim.VTimeInSec, stage sim.Ticker) bool {
 }
 
 func (c *Cache) discardInflightTransactions(now sim.VTimeInSec) {
+	salvaged := c.salvageEvictions()
+
 	sets := c.directory.GetSets()
 	for _, set := range sets {
 		for _, block := range set.Blocks {
@@ -125,4 +157,12 @@ func (c *Cache) discardInflightTransactions(now sim.VTimeInSec) {
 	// }
 
 	c.inFlightTransactions = nil
+	c.writeBuffer.pendingEvictions = append(
+		c.writeBuffer.pendingEvictions, salvaged...)
+}
+
+func (c *Cache) SetBlockStats(s *blockstats.Stats) {
+	if d, ok := c.directory.(*cache.DirectoryImpl); ok {
+		d.SetBlockStats(s)
+	}
 }

@@ -168,6 +168,7 @@ func (wb *writeBufferStage) processWriteBufferEvictAndWrite(
 	bankBuf.Push(trans)
 
 	wb.pendingEvictions = append(wb.pendingEvictions, trans)
+	wb.cache.dropEvictionInFlight(trans)
 	wb.cache.writeBufferBuffer.Pop()
 
 	// log.Printf("%.10f, %s, wb evict and write， %s, %04X, %04X, (%d, %d), %v\n",
@@ -212,6 +213,7 @@ func (wb *writeBufferStage) processWriteBufferFlush(
 	}
 
 	wb.pendingEvictions = append(wb.pendingEvictions, trans)
+	wb.cache.dropEvictionInFlight(trans)
 
 	if popAfterDone {
 		wb.cache.writeBufferBuffer.Pop()

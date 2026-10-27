@@ -1,6 +1,7 @@
 package writearound
 
 import (
+	"github.com/sarchlab/akita/v3/mem/cache"
 	"github.com/sarchlab/akita/v3/pipelining"
 	"github.com/sarchlab/akita/v3/sim"
 	"github.com/sarchlab/akita/v3/tracing"
@@ -153,6 +154,12 @@ func (s *bankStage) finalizeWriteFetchedTrans(
 
 	block.DirtyMask = trans.writeFetchedDirtyMask
 	block.IsLocked = false
+	if s.cache.isUncacheable(block.Tag) {
+		block.IsValid = false
+		if d, ok := s.cache.directory.(*cache.DirectoryImpl); ok {
+			d.Bypass(block)
+		}
+	}
 
 	s.postPipelineBuf.Pop()
 

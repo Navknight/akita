@@ -417,6 +417,7 @@ func (ds *directoryStage) evict(
 	ds.buf.Pop()
 	bankBuf.Push(trans)
 	ds.cache.evictingList[trans.victim.Tag] = true
+	ds.cache.evictionsInFlight = append(ds.cache.evictionsInFlight, trans)
 
 	// log.Printf("%.10f, %s, directory evict ， %s, %04X, %04X, (%d, %d), %v\n",
 	// 	now, ds.cache.Name(),

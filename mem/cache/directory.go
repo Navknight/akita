@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"github.com/sarchlab/akita/v3/mem/blockstats"
 	"github.com/sarchlab/akita/v3/mem/mem"
 	"github.com/sarchlab/akita/v3/mem/vm"
 )
@@ -17,6 +18,7 @@ type Block struct {
 	ReadCount    int
 	IsLocked     bool
 	DirtyMask    []bool
+	Stats        blockstats.Entry
 }
 
 // A Set is a list of blocks where a certain piece memory can be stored at
@@ -49,6 +51,17 @@ type DirectoryImpl struct {
 	Sets []Set
 
 	victimFinder VictimFinder
+	stats        *blockstats.Stats
+}
+
+func (d *DirectoryImpl) SetBlockStats(s *blockstats.Stats) {
+	d.stats = s
+}
+
+func (d *DirectoryImpl) Bypass(block *Block) {
+	if d.stats != nil {
+		d.stats.Bypass(&block.Stats)
+	}
 }
 
 // NewDirectory returns a new directory object
@@ -109,6 +122,10 @@ func (d *DirectoryImpl) FindVictim(addr uint64) *Block {
 
 // Visit moves the block to the end of the LRUQueue
 func (d *DirectoryImpl) Visit(block *Block) {
+	if d.stats != nil {
+		d.stats.Access(&block.Stats, block.Tag, uint64(block.PID))
+	}
+
 	set := d.Sets[block.SetID]
 	for i, b := range set.LRUQueue {
 		if b == block {
@@ -126,6 +143,14 @@ func (d *DirectoryImpl) GetSets() []Set {
 
 // Reset will mark all the blocks in the directory invalid
 func (d *DirectoryImpl) Reset() {
+	if d.stats != nil {
+		for _, set := range d.Sets {
+			for _, block := range set.Blocks {
+				d.stats.Flush(&block.Stats)
+			}
+		}
+	}
+
 	d.Sets = make([]Set, d.NumSets)
 	for i := 0; i < d.NumSets; i++ {
 		for j := 0; j < d.NumWays; j++ {
