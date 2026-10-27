@@ -30,6 +30,10 @@ type Channel struct {
 	pipelineWidth          int
 }
 
+func (c *Channel) PipelineWidth() int {
+	return c.pipelineWidth
+}
+
 // PlugIn marks the port to be connected with the connection.
 func (c *Channel) PlugIn(port sim.Port, sourceSideBufSize int) {
 	c.Lock()

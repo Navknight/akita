@@ -26,7 +26,7 @@ func (r Remote) Bandwidth(flitSize int) float64 {
 	case *sim.DirectConnection:
 		return math.Inf(1)
 	case *messaging.Channel:
-		return float64(l.Freq) * float64(flitSize)
+		return float64(l.Freq) * float64(flitSize) * float64(l.PipelineWidth())
 	default:
 		panic("unknown link type")
 	}
